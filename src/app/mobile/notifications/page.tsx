@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -13,13 +13,31 @@ import {
   Check,
   CheckCheck,
   Sparkles,
+  Mail,
+  MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MobileHeader } from "@/components/mobile/mobile-header";
+import {
+  getAllRemindersForMe,
+  isReminderRead,
+  markReminderRead,
+  subscribeToNotifications,
+  markAllRead as markAllRemindersRead,
+} from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 
-type NotifType = "booking" | "flight" | "hotel" | "promo" | "message" | "ai";
+type NotifType =
+  | "booking"
+  | "flight"
+  | "hotel"
+  | "promo"
+  | "message"
+  | "ai"
+  | "payment-email"
+  | "payment-sms"
+  | "payment-push";
 
 interface Notification {
   id: string;
@@ -104,7 +122,26 @@ const typeConfig: Record<NotifType, { icon: any; color: string }> = {
   promo: { icon: Tag, color: "text-amber-600 bg-amber-50" },
   message: { icon: MessageCircle, color: "text-violet-600 bg-violet-50" },
   ai: { icon: Sparkles, color: "text-pink-600 bg-pink-50" },
+  "payment-email": { icon: Mail, color: "text-blue-600 bg-blue-50" },
+  "payment-sms": { icon: MessageSquare, color: "text-emerald-600 bg-emerald-50" },
+  "payment-push": { icon: Bell, color: "text-primary bg-primary/10" },
 };
+
+function reminderRelTime(iso: string) {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const min = Math.round(diffMs / 60_000);
+  if (min < 1) return "Just now";
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr} hr ago`;
+  const d = Math.round(hr / 24);
+  if (d === 1) return "Yesterday";
+  if (d < 7) return `${d} days ago`;
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
 
 function groupByTime(items: Notification[]) {
   const today: Notification[] = [];
@@ -122,19 +159,61 @@ function groupByTime(items: Notification[]) {
 }
 
 export default function MobileNotificationsPage() {
-  const [items, setItems] = useState(seed);
+  const [mockItems, setMockItems] = useState(seed);
+  const [liveTick, setLiveTick] = useState(0);
   const [tab, setTab] = useState<"all" | "unread">("all");
+
+  // Re-fetch live reminders whenever the store changes
+  useEffect(() => subscribeToNotifications(() => setLiveTick((t) => t + 1)), []);
+
+  const liveItems: Notification[] = useMemo(() => {
+    void liveTick; // subscription trigger
+    return getAllRemindersForMe().map<Notification>((r) => {
+      const type: NotifType =
+        r.channel === "email"
+          ? "payment-email"
+          : r.channel === "sms"
+          ? "payment-sms"
+          : "payment-push";
+      const title =
+        r.channel === "email"
+          ? r.subject || "Payment reminder from your host"
+          : r.channel === "sms"
+          ? `${r.senderName} texted you`
+          : `${r.senderName} · Pack & Pally`;
+      return {
+        id: r.id,
+        type,
+        title,
+        body: r.body.replace(/\s+/g, " ").slice(0, 140),
+        time: reminderRelTime(r.sentAt),
+        read: isReminderRead(r.id),
+        link: `/mobile/notifications/${r.id}`,
+      };
+    });
+  }, [liveTick]);
+
+  // Live payment reminders first (most relevant), then mock demo items
+  const items = [...liveItems, ...mockItems];
 
   const filtered = tab === "unread" ? items.filter((i) => !i.read) : items;
   const { today, earlier } = groupByTime(filtered);
   const unreadCount = items.filter((i) => !i.read).length;
 
-  const markAllRead = () =>
-    setItems((prev) => prev.map((i) => ({ ...i, read: true })));
-  const markOne = (id: string) =>
-    setItems((prev) =>
+  const markAllRead = () => {
+    setMockItems((prev) => prev.map((i) => ({ ...i, read: true })));
+    markAllRemindersRead();
+    setLiveTick((t) => t + 1);
+  };
+  const markOne = (id: string) => {
+    // Mock items
+    setMockItems((prev) =>
       prev.map((i) => (i.id === id ? { ...i, read: true } : i))
     );
+    // Live reminder
+    markReminderRead(id);
+    setLiveTick((t) => t + 1);
+  };
 
   const renderNotif = (n: Notification) => {
     const config = typeConfig[n.type];

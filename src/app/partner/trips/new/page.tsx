@@ -19,6 +19,7 @@ import {
   ChevronDown,
   ChevronUp,
   Trash2,
+  Wand2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +39,7 @@ import {
   defaultNotIncluded,
   tripCategories,
 } from "@/data/partner-trips";
+import { AiTripModal } from "@/components/partner/ai-trip-modal";
 import { cn } from "@/lib/utils";
 
 const steps = [
@@ -60,6 +62,8 @@ interface ItineraryDay {
 export default function NewTripPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiGenerated, setAiGenerated] = useState(false);
 
   // Step 1 — Basics
   const [title, setTitle] = useState("");
@@ -101,6 +105,11 @@ export default function NewTripPage() {
 
   // Step 6 — Pricing
   const [price, setPrice] = useState(1999);
+  const [useTieredPricing, setUseTieredPricing] = useState(false);
+  const [priceSolo, setPriceSolo] = useState(2499);
+  const [priceCouple, setPriceCouple] = useState(2199);
+  const [priceGroupOf3, setPriceGroupOf3] = useState(1899);
+  const [taxRatePct, setTaxRatePct] = useState("8.25"); // percent; stored as decimal on save
 
   const duration = Math.max(
     1,
@@ -206,12 +215,34 @@ export default function NewTripPage() {
             Back to trips
           </Link>
         </Button>
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-          Create a new trip
-        </h1>
-        <p className="mt-1 text-muted-foreground">
-          Build your group adventure in {steps.length} easy steps
-        </p>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+              Create a new trip
+            </h1>
+            <p className="mt-1 text-muted-foreground">
+              Build your group adventure in {steps.length} easy steps
+            </p>
+          </div>
+          <Button
+            onClick={() => setAiOpen(true)}
+            className="gap-2 bg-gradient-to-r from-violet-500 to-primary hover:brightness-110 transition-all shrink-0"
+          >
+            <Wand2 className="h-4 w-4" />
+            Create with AI
+          </Button>
+        </div>
+
+        {aiGenerated && (
+          <div className="mt-4 flex items-center gap-2 rounded-lg bg-violet-50 border border-violet-200 p-3 text-xs text-violet-900">
+            <Sparkles className="h-3.5 w-3.5 shrink-0" />
+            <p>
+              <span className="font-semibold">AI draft ready.</span> Review each
+              step and tweak anything before publishing — AI-generated content is
+              a starting point.
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[240px_1fr]">
@@ -847,25 +878,150 @@ export default function NewTripPage() {
               <div>
                 <h2 className="text-xl font-bold">Pricing</h2>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Set your price per traveler
+                  Set your price per traveler — or unlock group discounts
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <Label>Price per person (USD)</Label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg text-muted-foreground">
-                    $
-                  </span>
-                  <Input
-                    type="number"
-                    value={price}
-                    onChange={(e) => setPrice(Number(e.target.value))}
-                    className="pl-8 h-14 text-lg font-semibold"
-                  />
+              {/* Flat vs Tiered toggle */}
+              <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-muted/50">
+                <button
+                  type="button"
+                  onClick={() => setUseTieredPricing(false)}
+                  className={cn(
+                    "rounded-lg py-2 text-xs font-semibold transition-colors",
+                    !useTieredPricing
+                      ? "bg-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Flat price
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUseTieredPricing(true)}
+                  className={cn(
+                    "rounded-lg py-2 text-xs font-semibold transition-colors",
+                    useTieredPricing
+                      ? "bg-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Tiered (group discounts)
+                </button>
+              </div>
+
+              {!useTieredPricing ? (
+                <div className="space-y-2">
+                  <Label>Price per person (USD)</Label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg text-muted-foreground">
+                      $
+                    </span>
+                    <Input
+                      type="number"
+                      value={price}
+                      onChange={(e) => setPrice(Number(e.target.value))}
+                      className="pl-8 h-14 text-lg font-semibold"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Similar {difficulty.toLowerCase()} trips in{" "}
+                    {country || "your area"} charge $1,500-$3,500
+                  </p>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Similar {difficulty.toLowerCase()} trips in {country || "your area"} charge $1,500-$3,500
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-xs text-muted-foreground">
+                    Set different rates based on how many travelers book
+                    together. The discounted rate applies to everyone in the
+                    group.
+                  </p>
+
+                  {[
+                    {
+                      key: "solo",
+                      label: "Solo traveler",
+                      hint: "1 traveler",
+                      value: priceSolo,
+                      setter: setPriceSolo,
+                    },
+                    {
+                      key: "couple",
+                      label: "Couple / duo",
+                      hint: "2 travelers",
+                      value: priceCouple,
+                      setter: setPriceCouple,
+                    },
+                    {
+                      key: "groupOf3",
+                      label: "Group rate",
+                      hint: "3+ travelers",
+                      value: priceGroupOf3,
+                      setter: setPriceGroupOf3,
+                    },
+                  ].map((tier) => (
+                    <div
+                      key={tier.key}
+                      className="rounded-xl border p-3 flex items-center gap-3"
+                    >
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold">{tier.label}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {tier.hint}
+                        </p>
+                      </div>
+                      <div className="relative w-36">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                          $
+                        </span>
+                        <Input
+                          type="number"
+                          value={tier.value}
+                          onChange={(e) => tier.setter(Number(e.target.value))}
+                          className="pl-7 h-10 font-semibold text-right"
+                        />
+                      </div>
+                    </div>
+                  ))}
+
+                  <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-900">
+                    <p className="font-semibold mb-1">💡 Group discount tip</p>
+                    <p className="text-[11px] leading-relaxed">
+                      Travelers see the discount auto-apply at checkout as the
+                      group grows. Larger groups pay less per person and you
+                      earn more overall.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Tax rate */}
+              <div className="rounded-xl border bg-white p-4 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <Label>Tax rate</Label>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Applied to every booking before checkout.
+                    </p>
+                  </div>
+                  <div className="relative w-28 shrink-0">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={30}
+                      step={0.01}
+                      value={taxRatePct}
+                      onChange={(e) => setTaxRatePct(e.target.value)}
+                      className="pr-8 h-10 font-semibold text-right"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                      %
+                    </span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground pt-1 border-t">
+                  Pack &amp; Pally&apos;s 6% platform fee is applied
+                  automatically on top — no action needed.
                 </p>
               </div>
 
@@ -874,31 +1030,56 @@ export default function NewTripPage() {
                   Your potential earnings
                 </p>
                 <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <p className="text-xs text-muted-foreground">If 50% full</p>
-                    <p className="text-lg font-bold">
-                      $
-                      {Math.round(
-                        price * Math.ceil(maxGroupSize / 2) * 0.85
-                      ).toLocaleString()}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">If 75% full</p>
-                    <p className="text-lg font-bold">
-                      $
-                      {Math.round(
-                        price * Math.ceil(maxGroupSize * 0.75) * 0.85
-                      ).toLocaleString()}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">If sold out</p>
-                    <p className="text-lg font-bold text-primary">
-                      $
-                      {Math.round(price * maxGroupSize * 0.85).toLocaleString()}
-                    </p>
-                  </div>
+                  {(() => {
+                    const ratesFor = (n: number) =>
+                      !useTieredPricing
+                        ? price
+                        : n <= 1
+                        ? priceSolo
+                        : n === 2
+                        ? priceCouple
+                        : priceGroupOf3;
+                    const half = Math.max(1, Math.ceil(maxGroupSize / 2));
+                    const threeQ = Math.max(1, Math.ceil(maxGroupSize * 0.75));
+                    const full = maxGroupSize;
+                    return (
+                      <>
+                        <div>
+                          <p className="text-xs text-muted-foreground">
+                            If 50% full
+                          </p>
+                          <p className="text-lg font-bold">
+                            $
+                            {Math.round(
+                              ratesFor(half) * half * 0.85
+                            ).toLocaleString()}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">
+                            If 75% full
+                          </p>
+                          <p className="text-lg font-bold">
+                            $
+                            {Math.round(
+                              ratesFor(threeQ) * threeQ * 0.85
+                            ).toLocaleString()}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">
+                            If sold out
+                          </p>
+                          <p className="text-lg font-bold text-primary">
+                            $
+                            {Math.round(
+                              ratesFor(full) * full * 0.85
+                            ).toLocaleString()}
+                          </p>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
                 <p className="text-xs text-muted-foreground mt-3">
                   After 15% platform commission · per trip
@@ -1020,6 +1201,48 @@ export default function NewTripPage() {
           </div>
         </div>
       </div>
+
+      <AiTripModal
+        open={aiOpen}
+        onClose={() => setAiOpen(false)}
+        onGenerated={(result, inputs) => {
+          // Close modal
+          setAiOpen(false);
+          setAiGenerated(true);
+
+          // Step 1 fields
+          setTitle(result.title);
+          setDestination(inputs.destination);
+          setCountry(inputs.country);
+          setDescription(result.description);
+          setCategories(inputs.categories);
+          setDifficulty(inputs.difficulty);
+
+          // Step 2 — dates span the generated duration
+          const today = new Date();
+          const start = new Date(today.getTime() + 30 * 86400000);
+          const end = new Date(
+            start.getTime() + inputs.durationDays * 86400000
+          );
+          setStartDate(start.toISOString().split("T")[0]);
+          setEndDate(end.toISOString().split("T")[0]);
+          setMaxGroupSize(inputs.maxGroupSize);
+
+          // Step 3 — highlights + itinerary
+          setHighlights(result.highlights);
+          setItinerary(result.itinerary);
+
+          // Step 4 — included / not included
+          setIncluded(result.included);
+          setNotIncluded(result.notIncluded);
+
+          // Step 6 — pricing
+          setPrice(result.suggestedPrice);
+
+          // Jump to step 1 so the host can review from the top
+          setStep(1);
+        }}
+      />
     </div>
   );
 }

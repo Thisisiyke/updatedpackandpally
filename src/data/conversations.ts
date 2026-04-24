@@ -85,6 +85,66 @@ function iso(minutesAgo: number) {
   return new Date(Date.now() - minutesAgo * 60_000).toISOString();
 }
 
+// Additional travelers that can be added to group chats
+export const inviteableTravelers: Participant[] = [
+  {
+    id: "t-emily",
+    name: "Emily Chen",
+    avatar: "https://randomuser.me/api/portraits/women/22.jpg",
+    role: "traveler",
+    online: true,
+  },
+  {
+    id: "t-james",
+    name: "James Whitfield",
+    avatar: "https://randomuser.me/api/portraits/men/45.jpg",
+    role: "traveler",
+    online: false,
+  },
+  {
+    id: "t-diego",
+    name: "Diego Navarro",
+    avatar: "https://randomuser.me/api/portraits/men/28.jpg",
+    role: "traveler",
+    online: true,
+  },
+  {
+    id: "t-aisha",
+    name: "Aisha Patel",
+    avatar: "https://randomuser.me/api/portraits/women/56.jpg",
+    role: "traveler",
+    online: false,
+  },
+  {
+    id: "t-oliver",
+    name: "Oliver Berg",
+    avatar: "https://randomuser.me/api/portraits/men/67.jpg",
+    role: "traveler",
+    online: true,
+  },
+  {
+    id: "t-hannah",
+    name: "Hannah Johansson",
+    avatar: "https://randomuser.me/api/portraits/women/19.jpg",
+    role: "traveler",
+    online: false,
+  },
+  {
+    id: "t-ryan",
+    name: "Ryan Cooper",
+    avatar: "https://randomuser.me/api/portraits/men/12.jpg",
+    role: "traveler",
+    online: true,
+  },
+  {
+    id: "t-sarah",
+    name: "Sarah Mitchell",
+    avatar: "https://randomuser.me/api/portraits/women/33.jpg",
+    role: "traveler",
+    online: false,
+  },
+];
+
 // ── User-facing conversations (seen on mobile + dashboard) ──
 export const userConversations: Conversation[] = [
   {
@@ -130,6 +190,75 @@ export const userConversations: Conversation[] = [
     lastMessageAt: iso(60 * 30),
     lastSenderId: "me",
     unreadCount: 0,
+  },
+  // ── Group chats ──
+  {
+    id: "c-group-1",
+    isGroup: true,
+    groupName: "Amalfi Coast Travelers",
+    groupImage:
+      "https://images.unsplash.com/photo-1533105079780-92b9be482077?w=400&q=80",
+    participants: [
+      CURRENT_USER,
+      hosts[0],
+      inviteableTravelers[0], // Emily
+      inviteableTravelers[1], // James
+      inviteableTravelers[3], // Aisha
+    ],
+    tripId: "trip-1",
+    tripTitle: "Coastal Wonders of Amalfi",
+    tripImage:
+      "https://images.unsplash.com/photo-1533105079780-92b9be482077?w=400&q=80",
+    lastMessage: "Emily: Anyone from NYC? Wanna share an Uber? 🚕",
+    lastMessageAt: iso(25),
+    lastSenderId: "t-emily",
+    unreadCount: 4,
+    createdBy: "h-sofia",
+  },
+  {
+    id: "c-group-2",
+    isGroup: true,
+    groupName: "Kyoto Crew 🌸",
+    groupImage:
+      "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=400&q=80",
+    participants: [
+      CURRENT_USER,
+      hosts[1], // Kenji
+      inviteableTravelers[4], // Oliver
+      inviteableTravelers[5], // Hannah
+    ],
+    tripId: "trip-2",
+    tripTitle: "Sacred Temples of Kyoto",
+    tripImage:
+      "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=400&q=80",
+    lastMessage: "Kenji: Cherry blossoms are peaking early this year 🌸",
+    lastMessageAt: iso(60 * 5),
+    lastSenderId: "h-kenji",
+    unreadCount: 1,
+    createdBy: "h-kenji",
+  },
+  {
+    id: "c-group-3",
+    isGroup: true,
+    groupName: "Serengeti Safari Squad",
+    groupImage:
+      "https://images.unsplash.com/photo-1516426122078-c23e76319801?w=400&q=80",
+    participants: [
+      CURRENT_USER,
+      hosts[2], // Amara
+      inviteableTravelers[6], // Ryan
+      inviteableTravelers[2], // Diego
+      inviteableTravelers[7], // Sarah
+    ],
+    tripId: "trip-3",
+    tripTitle: "Serengeti Safari Experience",
+    tripImage:
+      "https://images.unsplash.com/photo-1516426122078-c23e76319801?w=400&q=80",
+    lastMessage: "You: Cameras charged and ready 📸",
+    lastMessageAt: iso(60 * 24 * 2),
+    lastSenderId: "me",
+    unreadCount: 0,
+    createdBy: "me",
   },
 ];
 
@@ -237,6 +366,36 @@ export const seedMessages: Record<string, Message[]> = {
   "c-partner-4": [
     mk("p4-1", "c-partner-4", "partner-me", "Welcome Aisha! Sending you a few local restaurant recs.", 60 * 48 * 2),
     mk("p4-2", "c-partner-4", "t-aisha", "Thanks for the recommendations!", 60 * 48),
+  ],
+
+  // ── Group chat messages ──
+  "c-group-1": [
+    mk("g1-1", "c-group-1", "h-sofia", "Welcome everyone to the Amalfi trip group! 👋", 60 * 24 * 3),
+    mk("g1-2", "c-group-1", "t-emily", "Hiiii! So excited to meet you all!", 60 * 24 * 3 - 45),
+    mk("g1-3", "c-group-1", "t-james", "Same here 🙌", 60 * 24 * 3 - 40),
+    mk("g1-4", "c-group-1", "me", "Hey folks! First group trip, can't wait 🌊", 60 * 24 * 3 - 30),
+    mk("g1-5", "c-group-1", "t-aisha", "Just booked my flight! Arriving morning of Jun 15.", 60 * 24 * 2),
+    mk("g1-6", "c-group-1", "h-sofia", "Great Aisha! Pickup at 2pm from Naples, full details in the itinerary PDF.", 60 * 24 * 2 - 10),
+    mk("g1-7", "c-group-1", "t-james", "Quick q — do we need swimsuits for day 1?", 60 * 24),
+    mk("g1-8", "c-group-1", "h-sofia", "Optional for welcome dinner, but definitely day 2+.", 60 * 24 - 15),
+    mk("g1-9", "c-group-1", "t-emily", "Anyone from NYC? Wanna share an Uber? 🚕", 25, false),
+  ],
+  "c-group-2": [
+    mk("g2-1", "c-group-2", "h-kenji", "Welcome to the Kyoto group!", 60 * 24 * 4),
+    mk("g2-2", "c-group-2", "t-oliver", "Hej! Looking forward to the tea ceremony 🍵", 60 * 24 * 4 - 30),
+    mk("g2-3", "c-group-2", "me", "Hi everyone! Been dreaming of this trip for years.", 60 * 24 * 3),
+    mk("g2-4", "c-group-2", "t-hannah", "Same! Any suggestions on good ramen spots near our ryokan?", 60 * 24 * 2),
+    mk("g2-5", "c-group-2", "h-kenji", "I'll send you a curated list — there's one right around the corner 🍜", 60 * 24 * 2 - 20),
+    mk("g2-6", "c-group-2", "h-kenji", "Cherry blossoms are peaking early this year 🌸", 60 * 5, false),
+  ],
+  "c-group-3": [
+    mk("g3-1", "c-group-3", "me", "Setting up this group so we can all coordinate 🙌", 60 * 24 * 7),
+    mk("g3-2", "c-group-3", "h-amara", "Perfect! Welcome everyone.", 60 * 24 * 7 - 20),
+    mk("g3-3", "c-group-3", "t-ryan", "Hey team! Long time camera nerd here.", 60 * 24 * 6),
+    mk("g3-4", "c-group-3", "t-diego", "Excited for this 🦁", 60 * 24 * 6 - 30),
+    mk("g3-5", "c-group-3", "t-sarah", "What lens range do you all recommend?", 60 * 24 * 5),
+    mk("g3-6", "c-group-3", "h-amara", "70-200mm is ideal. I'll have some spare gear too.", 60 * 24 * 5 - 15),
+    mk("g3-7", "c-group-3", "me", "Cameras charged and ready 📸", 60 * 24 * 2),
   ],
 };
 

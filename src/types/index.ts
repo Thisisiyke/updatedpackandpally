@@ -13,6 +13,13 @@ export interface Trip {
   endDate: string;
   durationDays: number;
   price: number;
+  priceTiers?: {
+    solo: number;
+    couple: number;
+    groupOf3: number;
+  };
+  /** Decimal (e.g. 0.0825 for 8.25%). Platform default 8.25% if unset. */
+  taxRate?: number;
   currency: string;
   maxGroupSize: number;
   currentBookings: number;

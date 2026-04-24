@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -19,6 +19,7 @@ import {
   MapPin,
   Compass,
   MessageCircle,
+  Sparkles,
 } from "lucide-react";
 import { useConversations } from "@/hooks/use-conversations";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { BottomTabs } from "@/components/mobile/bottom-tabs";
 import { MobileHeader } from "@/components/mobile/mobile-header";
 import { LogoutDialog } from "@/components/shared/logout-dialog";
+import { isStripeConnected } from "@/lib/partner-stripe";
 
 const menuSections = [
   {
@@ -87,6 +89,11 @@ export default function MobileProfilePage() {
   const router = useRouter();
   const [logoutOpen, setLogoutOpen] = useState(false);
   const { totalUnread } = useConversations("user");
+  const [isHosting, setIsHosting] = useState(false);
+
+  useEffect(() => {
+    setIsHosting(isStripeConnected());
+  }, []);
 
   const handleLogout = () => {
     router.push("/mobile");
@@ -141,22 +148,51 @@ export default function MobileProfilePage() {
           </div>
         </div>
 
-        {/* Become a host banner */}
+        {/* Hosting card — swaps between "Start hosting" and "Host dashboard" */}
         <div className="px-5 mt-4">
-          <div className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20 shrink-0">
-                <Compass className="h-5 w-5 text-amber-700" />
+          {isHosting ? (
+            <Link
+              href="/mobile/partner"
+              className="block rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/5 via-white to-violet-500/5 p-4"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/15 shrink-0">
+                  <Sparkles className="h-5 w-5 text-primary" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-bold flex items-center gap-1.5">
+                    Host dashboard
+                    <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[9px]">
+                      Active
+                    </Badge>
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
+                    Manage your trips and create new ones from your phone.
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground self-center shrink-0" />
               </div>
-              <div className="flex-1">
-                <p className="text-sm font-bold">Become a partner</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
-                  Start hosting trips or listing your property.
-                  Available on web only.
-                </p>
+            </Link>
+          ) : (
+            <Link
+              href="/mobile/partner/onboarding"
+              className="block rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20 shrink-0">
+                  <Compass className="h-5 w-5 text-amber-700" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-bold">Start hosting</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
+                    Connect with Stripe and create your first group trip right
+                    from your phone.
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground self-center shrink-0" />
               </div>
-            </div>
-          </div>
+            </Link>
+          )}
         </div>
 
         {/* Menu sections */}

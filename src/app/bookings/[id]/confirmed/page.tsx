@@ -15,6 +15,7 @@ import {
   Clock,
   Phone,
   ChevronRight,
+  MessageCircle,
   PartyPopper,
 } from "lucide-react";
 import { Container } from "@/components/shared/container";
@@ -26,7 +27,7 @@ import { formatHotelPrice } from "@/lib/hotel-generator";
 
 interface StoredBooking {
   bookingId: string;
-  type: "flight" | "hotel";
+  type: "flight" | "hotel" | "trip";
   createdAt: string;
   contact: { firstName: string; lastName: string; email: string; phone: string };
   totalPrice: number;
@@ -85,6 +86,7 @@ function ConfirmedContent({ id }: { id: string }) {
   }
 
   const isFlight = booking.type === "flight";
+  const isTrip = booking.type === "trip";
   const formatDate = (dateStr: string) =>
     new Date(dateStr).toLocaleDateString("en-US", {
       weekday: "long",
@@ -358,6 +360,24 @@ function ConfirmedContent({ id }: { id: string }) {
                     </p>
                   </div>
                 </div>
+              )}
+              {isTrip && (
+                <Link
+                  href="/dashboard"
+                  className="flex items-start gap-3 -mx-2 rounded-lg px-2 py-1 hover:bg-muted/50 transition-colors"
+                >
+                  <MessageCircle className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">
+                      You&apos;ve joined the trip group chat
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Meet your host and fellow travelers — open Messages to say
+                      hi
+                    </p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-1" />
+                </Link>
               )}
               <div className="flex items-start gap-3">
                 <Phone className="h-5 w-5 text-primary shrink-0 mt-0.5" />

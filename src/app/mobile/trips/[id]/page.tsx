@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useEffect, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
@@ -22,9 +22,22 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { MobileHeader } from "@/components/mobile/mobile-header";
+import { TermsModal } from "@/components/shared/terms-modal";
+import { CancellationPolicyModal } from "@/components/shared/cancellation-policy-modal";
 import { useWishlist } from "@/hooks/use-wishlist";
 import { trips } from "@/data/trips";
 import { hosts } from "@/data/hosts";
+import {
+  getHostTerms,
+  subscribeToHostTerms,
+  resolveCancellationPolicy,
+  CANCELLATION_PRESETS,
+} from "@/lib/host-terms";
+import type { HostTerms } from "@/lib/host-terms";
+import {
+  calculatePriceBreakdown,
+  formatRatePercent,
+} from "@/lib/trip-pricing";
 import { cn } from "@/lib/utils";
 
 export default function MobileTripDetail({
@@ -37,10 +50,21 @@ export default function MobileTripDetail({
   const wishlist = useWishlist();
   const [imageIdx, setImageIdx] = useState(0);
   const [expandedDay, setExpandedDay] = useState<number | null>(null);
+  const [termsOpen, setTermsOpen] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [hostTerms, setHostTerms] = useState<HostTerms | null>(null);
 
   const trip = trips.find((t) => t.id === id);
   const host = trip ? hosts.find((h) => h.id === trip.hostId) : null;
   const isSaved = trip ? wishlist.isSaved(trip.id, "trip") : false;
+
+  const hostIdForTerms = trip?.hostId;
+  useEffect(() => {
+    if (!hostIdForTerms) return;
+    const refresh = () => setHostTerms(getHostTerms(hostIdForTerms));
+    refresh();
+    return subscribeToHostTerms(refresh);
+  }, [hostIdForTerms]);
 
   if (!trip) {
     return (
@@ -60,6 +84,11 @@ export default function MobileTripDetail({
   const fillPercent = (trip.currentBookings / trip.maxGroupSize) * 100;
 
   const handleBook = () => {
+    setTermsOpen(true);
+  };
+
+  const proceedToCheckout = () => {
+    setTermsOpen(false);
     router.push(`/mobile/checkout?type=trip&tripId=${trip.id}`);
   };
 
@@ -296,6 +325,70 @@ export default function MobileTripDetail({
 
           <Separator className="my-5" />
 
+          {/* Price breakdown */}
+          {(() => {
+            const subtotal = trip.price;
+            const breakdown = calculatePriceBreakdown(subtotal, trip.taxRate);
+            return (
+              <div className="mb-5 rounded-xl border bg-muted/20 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                  Price per person
+                </p>
+                <div className="space-y-1 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Subtotal</span>
+                    <span>${subtotal.toLocaleString()}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      Tax ({formatRatePercent(breakdown.taxRate)})
+                    </span>
+                    <span>${breakdown.tax.toLocaleString()}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      Platform fee (
+                      {formatRatePercent(breakdown.platformFeeRate)})
+                    </span>
+                    <span>${breakdown.platformFee.toLocaleString()}</span>
+                  </div>
+                  <div className="mt-1.5 pt-1.5 border-t flex items-center justify-between font-bold">
+                    <span>Total</span>
+                    <span>${breakdown.total.toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Cancellation policy summary */}
+          {(() => {
+            const policy = resolveCancellationPolicy(host?.id);
+            const preset =
+              policy.preset !== "custom"
+                ? CANCELLATION_PRESETS[policy.preset]
+                : null;
+            return (
+              <button
+                type="button"
+                onClick={() => setCancelOpen(true)}
+                className="w-full rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-left mb-5"
+              >
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                  Cancellation policy
+                </p>
+                <p className="mt-0.5 text-xs font-semibold text-foreground">
+                  {preset
+                    ? `${preset.label} — ${preset.headline}`
+                    : "Custom policy — tap to read"}
+                </p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  Tap to see refund windows
+                </p>
+              </button>
+            );
+          })()}
+
           {/* Host */}
           {host && (
             <>
@@ -353,9 +446,33 @@ export default function MobileTripDetail({
           <p className="text-[10px] text-muted-foreground">per person</p>
         </div>
         <Button onClick={handleBook} className="flex-1 h-12" size="lg">
-          Book this trip
+          Join this trip
         </Button>
       </div>
+
+      <TermsModal
+        open={termsOpen}
+        onClose={() => setTermsOpen(false)}
+        onAccept={proceedToCheckout}
+        bookingType="trip"
+        customTerms={
+          hostTerms
+            ? {
+                title: hostTerms.title,
+                content: hostTerms.content,
+                authorName: host?.name,
+                updatedAt: hostTerms.updatedAt,
+              }
+            : null
+        }
+      />
+
+      <CancellationPolicyModal
+        open={cancelOpen}
+        onClose={() => setCancelOpen(false)}
+        policy={resolveCancellationPolicy(host?.id)}
+        hostName={host?.name}
+      />
     </div>
   );
 }

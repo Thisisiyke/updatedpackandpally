@@ -12,6 +12,15 @@ export interface PartnerTrip {
   endDate: string;
   durationDays: number;
   price: number;
+  // Optional tiered pricing — when set, overrides `price` based on group size
+  // Keys are the minimum number of travelers (1, 2, 3) at which the rate applies
+  priceTiers?: {
+    solo: number;       // price per person, 1 traveler
+    couple: number;     // price per person, 2 travelers
+    groupOf3: number;   // price per person, 3+ travelers
+  };
+  /** Decimal (e.g. 0.0825 for 8.25%). Platform default 8.25% if unset. */
+  taxRate?: number;
   currency: string;
   maxGroupSize: number;
   currentBookings: number;

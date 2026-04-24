@@ -472,9 +472,11 @@ export default function DashboardPage() {
                         Create and manage your group adventures
                       </p>
                     </div>
-                    <Button className="gap-1.5">
-                      <Plus className="h-4 w-4" />
-                      Create Trip
+                    <Button asChild className="gap-1.5">
+                      <Link href="/partner/trips/new">
+                        <Plus className="h-4 w-4" />
+                        Create Trip
+                      </Link>
                     </Button>
                   </div>
 

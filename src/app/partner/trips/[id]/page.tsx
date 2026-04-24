@@ -36,6 +36,8 @@ import {
   defaultNotIncluded,
   tripCategories,
 } from "@/data/partner-trips";
+import { AiSurveyCard } from "@/components/partner/ai-survey-card";
+import { CURRENT_PARTNER } from "@/data/conversations";
 import { cn } from "@/lib/utils";
 
 function SavedToast({ visible }: { visible: boolean }) {
@@ -63,6 +65,11 @@ export default function TripEditPage({
   const [description, setDescription] = useState(initial?.description || "");
   const [difficulty, setDifficulty] = useState(initial?.difficulty || "Easy");
   const [price, setPrice] = useState(initial?.price || 0);
+  const [taxRatePct, setTaxRatePct] = useState(
+    typeof initial?.taxRate === "number"
+      ? (initial.taxRate * 100).toString()
+      : "8.25"
+  );
   const [maxGroupSize, setMaxGroupSize] = useState(initial?.maxGroupSize || 10);
   const [status, setStatus] = useState(initial?.status || "draft");
   const [categories, setCategories] = useState<string[]>(initial?.category || []);
@@ -141,6 +148,25 @@ export default function TripEditPage({
             Save
           </Button>
         </div>
+      </div>
+
+      {/* Trip sub-section tabs */}
+      <div className="mb-6 flex gap-1 rounded-lg border bg-muted/40 p-1 w-fit">
+        <span className="rounded-md bg-white px-4 py-1.5 text-sm font-semibold shadow-sm">
+          Overview
+        </span>
+        <Link
+          href={`/partner/trips/${id}/travelers`}
+          className="rounded-md px-4 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Travelers
+        </Link>
+        <Link
+          href={`/partner/trips/${id}/surveys`}
+          className="rounded-md px-4 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Surveys
+        </Link>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -386,6 +412,20 @@ export default function TripEditPage({
               </div>
             </div>
           </div>
+
+          {/* AI post-trip survey */}
+          <AiSurveyCard
+            trip={{
+              id: initial.id,
+              destination: initial.destination,
+              country: initial.country,
+              highlights: initial.highlights,
+              difficulty: initial.difficulty,
+              category: initial.category,
+              currentBookings: initial.currentBookings,
+            }}
+            host={{ name: CURRENT_PARTNER.name }}
+          />
         </div>
 
         {/* Right sidebar */}
@@ -428,8 +468,8 @@ export default function TripEditPage({
           </div>
 
           {/* Pricing */}
-          <div className="rounded-2xl border bg-white p-6">
-            <h3 className="font-bold mb-3">Pricing</h3>
+          <div className="rounded-2xl border bg-white p-6 space-y-4">
+            <h3 className="font-bold">Pricing</h3>
             <div className="space-y-2">
               <Label>Price per person</Label>
               <div className="relative">
@@ -443,6 +483,27 @@ export default function TripEditPage({
                   className="pl-7"
                 />
               </div>
+            </div>
+            <div className="space-y-2 pt-3 border-t">
+              <Label>Tax rate</Label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  min={0}
+                  max={30}
+                  step={0.01}
+                  value={taxRatePct}
+                  onChange={(e) => setTaxRatePct(e.target.value)}
+                  className="pr-8 text-right font-semibold"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                  %
+                </span>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Plus Pack &amp; Pally&apos;s 6% platform fee, applied
+                automatically.
+              </p>
             </div>
           </div>
 

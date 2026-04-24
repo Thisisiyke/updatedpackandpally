@@ -119,8 +119,8 @@ export default function BecomeAHostPage() {
               places. Share your world, meet amazing people, and earn while doing
               what you love.
             </p>
-            <Button size="lg" className="mt-8 text-base px-8 h-12">
-              Apply to Host
+            <Button asChild size="lg" className="mt-8 text-base px-8 h-12">
+              <Link href="/partner/onboarding">Apply to Host</Link>
             </Button>
           </div>
         </Container>
@@ -260,8 +260,8 @@ export default function BecomeAHostPage() {
             <p className="mt-4 text-lg text-white/70">
               Join our community of hosts and start leading adventures today.
             </p>
-            <Button size="lg" className="mt-8 text-base px-8 h-12">
-              Apply Now
+            <Button asChild size="lg" className="mt-8 text-base px-8 h-12">
+              <Link href="/partner/onboarding">Apply Now</Link>
             </Button>
           </div>
         </Container>

@@ -17,6 +17,11 @@ import {
   Plane,
   Calendar,
   Clock,
+  Compass,
+  Minus,
+  Plus,
+  Users,
+  Wallet,
 } from "lucide-react";
 import { Container } from "@/components/shared/container";
 import { Button } from "@/components/ui/button";
@@ -34,12 +39,24 @@ import {
   formatHotelPrice,
   calculateNights,
 } from "@/lib/hotel-generator";
+import {
+  depositAmount,
+  remainingAmount,
+  tripTotal,
+  perPersonRate,
+  DEPOSIT_PERCENT,
+  calculatePriceBreakdown,
+  formatRatePercent,
+} from "@/lib/trip-pricing";
+import { trips } from "@/data/trips";
+import { hosts } from "@/data/hosts";
+import { joinTripGroupChat } from "@/hooks/use-conversations";
 import { cn } from "@/lib/utils";
 
 function CheckoutContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const type = searchParams.get("type"); // "flight" | "hotel"
+  const type = searchParams.get("type"); // "flight" | "hotel" | "trip"
 
   // Flight params
   const flightId = searchParams.get("flightId");
@@ -60,6 +77,10 @@ function CheckoutContent() {
   const guests = Number(searchParams.get("guests") || "2");
   const rooms = Number(searchParams.get("rooms") || "1");
 
+  // Trip params
+  const tripId = searchParams.get("tripId");
+  const initialTravelers = Math.max(1, Number(searchParams.get("travelers") || "1"));
+
   const flights = useMemo(() => {
     if (type !== "flight") return [];
     return generateFlights({
@@ -77,6 +98,7 @@ function CheckoutContent() {
   const selectedFlight = type === "flight" ? flights.find((f) => f.id === flightId) : null;
   const selectedHotel = type === "hotel" ? hotels.find((h) => h.id === hotelId) : null;
   const selectedRoom = selectedHotel?.roomTypes.find((r) => r.id === roomId) || selectedHotel?.roomTypes[0];
+  const selectedTrip = type === "trip" ? trips.find((t) => t.id === tripId) : null;
   const nights = type === "hotel" ? calculateNights(checkIn, checkOut) : 0;
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -89,6 +111,15 @@ function CheckoutContent() {
   const [phone, setPhone] = useState("");
   const [specialRequests, setSpecialRequests] = useState("");
 
+  // Trip-specific state
+  const spotsAvailable = selectedTrip
+    ? Math.max(1, selectedTrip.maxGroupSize - selectedTrip.currentBookings)
+    : 1;
+  const [tripTravelers, setTripTravelers] = useState(
+    Math.min(initialTravelers, selectedTrip ? spotsAvailable : initialTravelers)
+  );
+  const [paymentMode, setPaymentMode] = useState<"full" | "partial">("full");
+
   // Step 2: Payment
   const [cardNumber, setCardNumber] = useState("");
   const [cardName, setCardName] = useState("");
@@ -98,7 +129,7 @@ function CheckoutContent() {
   const [billingCity, setBillingCity] = useState("");
   const [billingZip, setBillingZip] = useState("");
 
-  if (!selectedFlight && !selectedHotel) {
+  if (!selectedFlight && !selectedHotel && !selectedTrip) {
     return (
       <Container className="py-16">
         <div className="text-center">
@@ -115,13 +146,27 @@ function CheckoutContent() {
   }
 
   // Calculate totals
+  const tripPricing = selectedTrip
+    ? {
+        rate: perPersonRate(selectedTrip.price, selectedTrip.priceTiers, tripTravelers),
+        subtotal: tripTotal(selectedTrip.price, selectedTrip.priceTiers, tripTravelers),
+      }
+    : null;
+
   const subtotal = selectedFlight
     ? selectedFlight.price
     : selectedRoom && nights > 0
     ? selectedRoom.pricePerNight * nights
+    : tripPricing
+    ? tripPricing.subtotal
     : 0;
-  const taxes = Math.round(subtotal * 0.12);
-  const total = subtotal + taxes;
+  const breakdown = calculatePriceBreakdown(subtotal, selectedTrip?.taxRate);
+  const taxes = breakdown.tax + breakdown.platformFee;
+  const total = breakdown.total;
+  const amountDueNow =
+    type === "trip" && paymentMode === "partial" ? depositAmount(total) : total;
+  const amountDueLater =
+    type === "trip" && paymentMode === "partial" ? remainingAmount(total) : 0;
 
   const handleStep1Next = () => {
     if (!firstName || !lastName || !email || !phone) return;
@@ -144,6 +189,7 @@ function CheckoutContent() {
       flight: selectedFlight || null,
       hotel: selectedHotel || null,
       room: selectedRoom || null,
+      trip: selectedTrip || null,
       checkIn: type === "hotel" ? checkIn : null,
       checkOut: type === "hotel" ? checkOut : null,
       guests: type === "hotel" ? guests : null,
@@ -151,6 +197,10 @@ function CheckoutContent() {
       departDate: type === "flight" ? departDate : null,
       returnDate: type === "flight" ? returnDate : null,
       passengers: type === "flight" ? passengers : null,
+      tripTravelers: type === "trip" ? tripTravelers : null,
+      paymentMode: type === "trip" ? paymentMode : "full",
+      amountPaidNow: amountDueNow,
+      amountDueLater,
       specialRequests,
     };
 
@@ -161,6 +211,11 @@ function CheckoutContent() {
       existing.push(bookingData);
       localStorage.setItem("packpally_bookings", JSON.stringify(existing));
     } catch {}
+
+    if (selectedTrip) {
+      const tripHost = hosts.find((h) => h.id === selectedTrip.hostId);
+      joinTripGroupChat(selectedTrip, tripHost);
+    }
 
     router.push(`/bookings/${bookingId}/confirmed`);
   };
@@ -242,11 +297,96 @@ function CheckoutContent() {
             {step === 1 && (
               <div className="rounded-2xl border bg-white p-6">
                 <h1 className="text-2xl font-bold mb-1">
-                  {type === "flight" ? "Traveler details" : "Guest details"}
+                  {type === "flight"
+                    ? "Traveler details"
+                    : type === "trip"
+                    ? "Traveler details"
+                    : "Guest details"}
                 </h1>
                 <p className="text-sm text-muted-foreground mb-6">
-                  Enter the primary {type === "flight" ? "traveler" : "guest"}&apos;s information
+                  Enter the primary{" "}
+                  {type === "flight" || type === "trip" ? "traveler" : "guest"}
+                  &apos;s information
                 </p>
+
+                {type === "trip" && selectedTrip && tripPricing && (
+                  <div className="mb-6 rounded-xl bg-primary/5 border border-primary/10 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="text-sm font-semibold flex items-center gap-1.5">
+                          <Users className="h-4 w-4 text-primary" />
+                          How many travelers?
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {spotsAvailable} spot{spotsAvailable !== 1 ? "s" : ""} left
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-9 w-9"
+                          onClick={() =>
+                            setTripTravelers(Math.max(1, tripTravelers - 1))
+                          }
+                          disabled={tripTravelers <= 1}
+                        >
+                          <Minus className="h-4 w-4" />
+                        </Button>
+                        <span className="w-8 text-center font-bold text-lg">
+                          {tripTravelers}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-9 w-9"
+                          onClick={() =>
+                            setTripTravelers(
+                              Math.min(spotsAvailable, tripTravelers + 1)
+                            )
+                          }
+                          disabled={tripTravelers >= spotsAvailable}
+                        >
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                    <Separator className="my-3" />
+                    <div className="space-y-1 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">
+                          ${tripPricing.rate.toLocaleString()} × {tripTravelers}{" "}
+                          traveler{tripTravelers !== 1 ? "s" : ""}
+                        </span>
+                        <span>
+                          ${tripPricing.subtotal.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>
+                          Tax ({formatRatePercent(breakdown.taxRate)})
+                        </span>
+                        <span>${breakdown.tax.toLocaleString()}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>
+                          Platform fee (
+                          {formatRatePercent(breakdown.platformFeeRate)})
+                        </span>
+                        <span>${breakdown.platformFee.toLocaleString()}</span>
+                      </div>
+                      <div className="flex items-center justify-between pt-1 border-t font-bold">
+                        <span>Total</span>
+                        <span>${breakdown.total.toLocaleString()}</span>
+                      </div>
+                    </div>
+                    {selectedTrip.priceTiers && (
+                      <p className="mt-1 text-xs text-primary">
+                        Group rate applied
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
@@ -322,6 +462,66 @@ function CheckoutContent() {
                   <Lock className="h-3.5 w-3.5" />
                   All transactions are secure and encrypted
                 </p>
+
+                {type === "trip" && (
+                  <div className="mb-6">
+                    <h3 className="font-semibold mb-3 flex items-center gap-1.5">
+                      <Wallet className="h-4 w-4 text-primary" />
+                      Choose how you&apos;d like to pay
+                    </h3>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMode("full")}
+                        className={cn(
+                          "rounded-xl border p-4 text-left transition-all",
+                          paymentMode === "full"
+                            ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+                            : "border-muted hover:border-primary/40"
+                        )}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-semibold text-sm">Pay in full</span>
+                          {paymentMode === "full" && (
+                            <Check className="h-4 w-4 text-primary" />
+                          )}
+                        </div>
+                        <p className="text-xl font-bold">
+                          ${total.toLocaleString()}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          One charge today — you&apos;re all set
+                        </p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMode("partial")}
+                        className={cn(
+                          "rounded-xl border p-4 text-left transition-all",
+                          paymentMode === "partial"
+                            ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+                            : "border-muted hover:border-primary/40"
+                        )}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-semibold text-sm">
+                            Pay {Math.round(DEPOSIT_PERCENT * 100)}% deposit
+                          </span>
+                          {paymentMode === "partial" && (
+                            <Check className="h-4 w-4 text-primary" />
+                          )}
+                        </div>
+                        <p className="text-xl font-bold">
+                          ${depositAmount(total).toLocaleString()}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          ${remainingAmount(total).toLocaleString()} due 30 days
+                          before departure
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Card preview */}
                 <div className="mb-6 relative h-48 rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 text-white overflow-hidden">
@@ -564,6 +764,83 @@ function CheckoutContent() {
                   </div>
                 )}
 
+                {selectedTrip && tripPricing && (
+                  <div className="rounded-xl border p-4 mb-4">
+                    <div className="flex gap-3 mb-3">
+                      <div className="relative h-16 w-16 overflow-hidden rounded-lg shrink-0">
+                        <Image
+                          src={selectedTrip.coverImage}
+                          alt={selectedTrip.title}
+                          fill
+                          className="object-cover"
+                          sizes="64px"
+                        />
+                      </div>
+                      <div>
+                        <h3 className="font-bold">{selectedTrip.title}</h3>
+                        <p className="text-xs text-muted-foreground flex items-center gap-1">
+                          <MapPin className="h-3 w-3" />
+                          {selectedTrip.destination}, {selectedTrip.country}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Dates</p>
+                        <p className="font-medium">
+                          {new Date(selectedTrip.startDate).toLocaleDateString(
+                            "en-US",
+                            { month: "short", day: "numeric" }
+                          )}{" "}
+                          —{" "}
+                          {new Date(selectedTrip.endDate).toLocaleDateString(
+                            "en-US",
+                            { month: "short", day: "numeric" }
+                          )}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Duration</p>
+                        <p className="font-medium">
+                          {selectedTrip.durationDays} days
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Travelers</p>
+                        <p className="font-medium">{tripTravelers}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Per person</p>
+                        <p className="font-medium">
+                          ${tripPricing.rate.toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                    {paymentMode === "partial" && (
+                      <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-3">
+                        <p className="text-xs font-semibold text-amber-900 flex items-center gap-1.5">
+                          <Wallet className="h-3.5 w-3.5" />
+                          Partial payment plan
+                        </p>
+                        <div className="mt-2 space-y-1 text-xs text-amber-900/80">
+                          <div className="flex items-center justify-between">
+                            <span>Deposit due today</span>
+                            <span className="font-semibold">
+                              ${amountDueNow.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span>Remaining (30 days before departure)</span>
+                            <span className="font-semibold">
+                              ${amountDueLater.toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Contact info */}
                 <div className="rounded-xl border p-4 mb-4">
                   <h3 className="font-bold mb-3">Contact</h3>
@@ -614,7 +891,9 @@ function CheckoutContent() {
                     ) : (
                       <>
                         <Lock className="h-4 w-4" />
-                        Confirm and pay {formatHotelPrice(total)}
+                        {type === "trip" && paymentMode === "partial"
+                          ? `Pay deposit ${formatHotelPrice(amountDueNow)}`
+                          : `Confirm and pay ${formatHotelPrice(total)}`}
                       </>
                     )}
                   </Button>
@@ -678,14 +957,59 @@ function CheckoutContent() {
                 </div>
               )}
 
+              {selectedTrip && tripPricing && (
+                <div className="mb-4 pb-4 border-b">
+                  <div className="flex gap-3 mb-2">
+                    <div className="relative h-14 w-14 overflow-hidden rounded-lg shrink-0">
+                      <Image
+                        src={selectedTrip.coverImage}
+                        alt={selectedTrip.title}
+                        fill
+                        className="object-cover"
+                        sizes="56px"
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">
+                        {selectedTrip.title}
+                      </p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {selectedTrip.destination}, {selectedTrip.country}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedTrip.durationDays} days · {tripTravelers}{" "}
+                    traveler{tripTravelers !== 1 ? "s" : ""}
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-2 text-sm">
+                {selectedTrip && tripPricing ? (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      ${tripPricing.rate.toLocaleString()} × {tripTravelers}
+                    </span>
+                    <span>{formatHotelPrice(subtotal)}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Subtotal</span>
+                    <span>{formatHotelPrice(subtotal)}</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Subtotal</span>
-                  <span>{formatHotelPrice(subtotal)}</span>
+                  <span className="text-muted-foreground">
+                    Tax ({formatRatePercent(breakdown.taxRate)})
+                  </span>
+                  <span>{formatHotelPrice(breakdown.tax)}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Taxes & fees</span>
-                  <span>{formatHotelPrice(taxes)}</span>
+                  <span className="text-muted-foreground">
+                    Platform fee ({formatRatePercent(breakdown.platformFeeRate)})
+                  </span>
+                  <span>{formatHotelPrice(breakdown.platformFee)}</span>
                 </div>
               </div>
 
@@ -697,6 +1021,21 @@ function CheckoutContent() {
                   {formatHotelPrice(total)}
                 </span>
               </div>
+
+              {type === "trip" && paymentMode === "partial" && (
+                <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-3 space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-amber-900">Due today</span>
+                    <span className="font-bold text-amber-900">
+                      {formatHotelPrice(amountDueNow)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-amber-900/80">
+                    <span>Due later</span>
+                    <span>{formatHotelPrice(amountDueLater)}</span>
+                  </div>
+                </div>
+              )}
 
               <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
                 <Shield className="h-3.5 w-3.5" />

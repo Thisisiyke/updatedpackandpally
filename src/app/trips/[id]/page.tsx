@@ -1,9 +1,9 @@
 "use client";
 
-import { use } from "react";
+import { use, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, useRouter } from "next/navigation";
 import {
   ChevronRight,
   Calendar,
@@ -30,9 +30,21 @@ import {
 } from "@/components/ui/accordion";
 import { Container } from "@/components/shared/container";
 import { RatingStars } from "@/components/shared/rating-stars";
+import { TermsModal } from "@/components/shared/terms-modal";
+import { CancellationPolicyModal } from "@/components/shared/cancellation-policy-modal";
 import { trips } from "@/data/trips";
 import { hosts } from "@/data/hosts";
-import { useState } from "react";
+import {
+  getHostTerms,
+  subscribeToHostTerms,
+  resolveCancellationPolicy,
+  CANCELLATION_PRESETS,
+} from "@/lib/host-terms";
+import type { HostTerms } from "@/lib/host-terms";
+import {
+  calculatePriceBreakdown,
+  formatRatePercent,
+} from "@/lib/trip-pricing";
 
 export default function TripDetailPage({
   params,
@@ -40,11 +52,30 @@ export default function TripDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const router = useRouter();
   const trip = trips.find((t) => t.id === id);
   const [travelers, setTravelers] = useState(1);
   const [selectedImage, setSelectedImage] = useState(0);
+  const [termsOpen, setTermsOpen] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [hostTerms, setHostTerms] = useState<HostTerms | null>(null);
+
+  const hostIdForTerms = trip?.hostId;
+
+  useEffect(() => {
+    if (!hostIdForTerms) return;
+    const refresh = () => setHostTerms(getHostTerms(hostIdForTerms));
+    refresh();
+    return subscribeToHostTerms(refresh);
+  }, [hostIdForTerms]);
 
   if (!trip) return notFound();
+
+  const handleBookClick = () => setTermsOpen(true);
+  const proceedToCheckout = () => {
+    setTermsOpen(false);
+    router.push(`/checkout?type=trip&tripId=${id}&travelers=${travelers}`);
+  };
 
   const host = hosts.find((h) => h.id === trip.hostId);
   const spotsLeft = trip.maxGroupSize - trip.currentBookings;
@@ -336,21 +367,74 @@ export default function TripDetailPage({
 
                 <Separator />
 
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">Total</span>
-                  <span className="text-2xl font-bold">
-                    ${(trip.price * travelers).toLocaleString()}
-                  </span>
-                </div>
+                {(() => {
+                  const subtotal = trip.price * travelers;
+                  const breakdown = calculatePriceBreakdown(
+                    subtotal,
+                    trip.taxRate
+                  );
+                  return (
+                    <>
+                      <div className="space-y-1.5 text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">
+                            ${trip.price.toLocaleString()} × {travelers}
+                          </span>
+                          <span>${subtotal.toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">
+                            Tax ({formatRatePercent(breakdown.taxRate)})
+                          </span>
+                          <span>${breakdown.tax.toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">
+                            Platform fee (
+                            {formatRatePercent(breakdown.platformFeeRate)})
+                          </span>
+                          <span>
+                            ${breakdown.platformFee.toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
 
-                <Button className="w-full h-12 text-base" size="lg">
-                  Book This Trip
+                      <Separator />
+
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">Total</span>
+                        <span className="text-2xl font-bold">
+                          ${breakdown.total.toLocaleString()}
+                        </span>
+                      </div>
+                    </>
+                  );
+                })()}
+
+                <Button
+                  className="w-full h-12 text-base"
+                  size="lg"
+                  onClick={handleBookClick}
+                >
+                  Join This Trip
                 </Button>
 
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Shield className="h-4 w-4 shrink-0" />
-                  Free cancellation up to 30 days before departure
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setCancelOpen(true)}
+                  className="flex w-full items-start gap-2 text-left text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Shield className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>
+                    {(() => {
+                      const p = resolveCancellationPolicy(host?.id);
+                      if (p.preset === "custom") {
+                        return "Custom cancellation policy — tap to read";
+                      }
+                      return `${CANCELLATION_PRESETS[p.preset].label} cancellation — ${CANCELLATION_PRESETS[p.preset].headline}`;
+                    })()}
+                  </span>
+                </button>
               </div>
             </div>
           </div>
@@ -365,10 +449,36 @@ export default function TripDetailPage({
                 ${trip.price.toLocaleString()}
               </p>
             </div>
-            <Button size="lg">Book This Trip</Button>
+            <Button size="lg" onClick={handleBookClick}>
+              Join This Trip
+            </Button>
           </div>
         </div>
       </Container>
+
+      <TermsModal
+        open={termsOpen}
+        onClose={() => setTermsOpen(false)}
+        onAccept={proceedToCheckout}
+        bookingType="trip"
+        customTerms={
+          hostTerms
+            ? {
+                title: hostTerms.title,
+                content: hostTerms.content,
+                authorName: host?.name,
+                updatedAt: hostTerms.updatedAt,
+              }
+            : null
+        }
+      />
+
+      <CancellationPolicyModal
+        open={cancelOpen}
+        onClose={() => setCancelOpen(false)}
+        policy={resolveCancellationPolicy(host?.id)}
+        hostName={host?.name}
+      />
     </section>
   );
 }

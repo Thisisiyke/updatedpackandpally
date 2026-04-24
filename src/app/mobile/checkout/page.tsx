@@ -22,7 +22,18 @@ import { Separator } from "@/components/ui/separator";
 import { MobileHeader } from "@/components/mobile/mobile-header";
 import { generateFlights, formatDuration, formatPrice } from "@/lib/flight-generator";
 import { generateHotels, calculateNights, formatHotelPrice } from "@/lib/hotel-generator";
+import {
+  depositAmount,
+  remainingAmount,
+  tripTotal,
+  perPersonRate,
+  DEPOSIT_PERCENT,
+  calculatePriceBreakdown,
+  formatRatePercent,
+} from "@/lib/trip-pricing";
 import { trips } from "@/data/trips";
+import { hosts } from "@/data/hosts";
+import { joinTripGroupChat } from "@/hooks/use-conversations";
 import { cn } from "@/lib/utils";
 
 function CheckoutContent() {
@@ -59,6 +70,9 @@ function CheckoutContent() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
 
+  const [tripTravelers, setTripTravelers] = useState(1);
+  const [paymentMode, setPaymentMode] = useState<"full" | "partial">("full");
+
   const [cardNumber, setCardNumber] = useState("");
   const [cardName, setCardName] = useState("");
   const [expiry, setExpiry] = useState("");
@@ -85,15 +99,30 @@ function CheckoutContent() {
 
   const nights = type === "hotel" ? calculateNights(checkIn, checkOut) : 0;
 
+  // For group trips, scale by traveler count and any tiered pricing on the trip
+  const tripPricing = selectedTrip
+    ? {
+        rate: perPersonRate(selectedTrip.price, selectedTrip.priceTiers, tripTravelers),
+        subtotal: tripTotal(selectedTrip.price, selectedTrip.priceTiers, tripTravelers),
+      }
+    : null;
+
   const subtotal = selectedFlight
     ? selectedFlight.price
     : selectedRoom && nights > 0
     ? selectedRoom.pricePerNight * nights
-    : selectedTrip
-    ? selectedTrip.price
+    : tripPricing
+    ? tripPricing.subtotal
     : 0;
-  const taxes = Math.round(subtotal * 0.12);
-  const total = subtotal + taxes;
+  const breakdown = calculatePriceBreakdown(subtotal, selectedTrip?.taxRate);
+  const taxes = breakdown.tax + breakdown.platformFee;
+  const total = breakdown.total;
+  const amountDueNow =
+    type === "trip" && paymentMode === "partial"
+      ? depositAmount(total)
+      : total;
+  const amountDueLater =
+    type === "trip" && paymentMode === "partial" ? remainingAmount(total) : 0;
 
   if (!selectedFlight && !selectedHotel && !selectedTrip) {
     return (
@@ -131,6 +160,10 @@ function CheckoutContent() {
       departDate: type === "flight" ? departDate : null,
       returnDate: type === "flight" ? returnDate : null,
       passengers: type === "flight" ? passengers : null,
+      tripTravelers: type === "trip" ? tripTravelers : null,
+      paymentMode: type === "trip" ? paymentMode : "full",
+      amountPaidNow: amountDueNow,
+      amountDueLater,
     };
 
     try {
@@ -138,6 +171,11 @@ function CheckoutContent() {
       existing.push(bookingData);
       localStorage.setItem("packpally_bookings", JSON.stringify(existing));
     } catch {}
+
+    if (selectedTrip) {
+      const tripHost = hosts.find((h) => h.id === selectedTrip.hostId);
+      joinTripGroupChat(selectedTrip, tripHost);
+    }
 
     router.push(`/mobile/confirmation/${bookingId}`);
   };
@@ -291,6 +329,92 @@ function CheckoutContent() {
                 />
               </div>
             </div>
+
+            {/* Traveler count — trip bookings only */}
+            {type === "trip" && selectedTrip && (
+              <div className="pt-4 border-t space-y-2">
+                <div>
+                  <Label className="text-xs">How many travelers?</Label>
+                  <p className="text-[10px] text-muted-foreground">
+                    Max group size: {selectedTrip.maxGroupSize}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTripTravelers((n) => Math.max(1, n - 1))
+                    }
+                    disabled={tripTravelers <= 1}
+                    className="flex h-10 w-10 items-center justify-center rounded-full border disabled:opacity-40 transition-colors hover:bg-muted"
+                    aria-label="Decrease travelers"
+                  >
+                    <span className="text-lg font-bold leading-none">−</span>
+                  </button>
+
+                  <div className="flex-1 text-center">
+                    <p className="text-2xl font-extrabold leading-none">
+                      {tripTravelers}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      {tripTravelers === 1 ? "traveler" : "travelers"}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTripTravelers((n) =>
+                        Math.min(
+                          selectedTrip.maxGroupSize -
+                            selectedTrip.currentBookings,
+                          n + 1
+                        )
+                      )
+                    }
+                    disabled={
+                      tripTravelers >=
+                      selectedTrip.maxGroupSize - selectedTrip.currentBookings
+                    }
+                    className="flex h-10 w-10 items-center justify-center rounded-full border disabled:opacity-40 transition-colors hover:bg-muted"
+                    aria-label="Increase travelers"
+                  >
+                    <span className="text-lg font-bold leading-none">+</span>
+                  </button>
+                </div>
+
+                {tripPricing && (
+                  <div className="rounded-xl bg-primary/5 border border-primary/10 p-3 text-xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">
+                        ${tripPricing.rate.toLocaleString()} × {tripTravelers}
+                      </span>
+                      <span>${tripPricing.subtotal.toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-muted-foreground">
+                      <span>Tax ({formatRatePercent(breakdown.taxRate)})</span>
+                      <span>${breakdown.tax.toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-muted-foreground">
+                      <span>
+                        Platform fee ({formatRatePercent(breakdown.platformFeeRate)})
+                      </span>
+                      <span>${breakdown.platformFee.toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between font-bold pt-1 border-t">
+                      <span>Total</span>
+                      <span>${breakdown.total.toLocaleString()}</span>
+                    </div>
+                    {selectedTrip.priceTiers && (
+                      <p className="text-[10px] text-primary">
+                        Group rate applied
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -305,6 +429,90 @@ function CheckoutContent() {
                 Secure, encrypted checkout
               </p>
             </div>
+
+            {/* Payment mode — trip bookings only */}
+            {type === "trip" && (
+              <div className="space-y-2 pb-2 border-b">
+                <Label className="text-xs">Choose a payment option</Label>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMode("full")}
+                    className={cn(
+                      "w-full flex items-start gap-3 rounded-xl border p-3 text-left transition-all",
+                      paymentMode === "full"
+                        ? "border-primary ring-2 ring-primary/20 bg-primary/5"
+                        : "hover:bg-muted/30"
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "flex h-5 w-5 items-center justify-center rounded-full border-2 shrink-0 mt-0.5",
+                        paymentMode === "full"
+                          ? "border-primary bg-primary"
+                          : "border-muted-foreground/30"
+                      )}
+                    >
+                      {paymentMode === "full" && (
+                        <div className="h-2 w-2 rounded-full bg-white" />
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-bold">Pay in full</p>
+                        <span className="text-sm font-bold">
+                          ${total.toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">
+                        One-time payment, nothing else to worry about
+                      </p>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMode("partial")}
+                    className={cn(
+                      "w-full flex items-start gap-3 rounded-xl border p-3 text-left transition-all",
+                      paymentMode === "partial"
+                        ? "border-primary ring-2 ring-primary/20 bg-primary/5"
+                        : "hover:bg-muted/30"
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "flex h-5 w-5 items-center justify-center rounded-full border-2 shrink-0 mt-0.5",
+                        paymentMode === "partial"
+                          ? "border-primary bg-primary"
+                          : "border-muted-foreground/30"
+                      )}
+                    >
+                      {paymentMode === "partial" && (
+                        <div className="h-2 w-2 rounded-full bg-white" />
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-bold">
+                          Pay {Math.round(DEPOSIT_PERCENT * 100)}% deposit
+                        </p>
+                        <span className="text-sm font-bold">
+                          ${depositAmount(total).toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">
+                        Remaining{" "}
+                        <span className="font-semibold">
+                          ${remainingAmount(total).toLocaleString()}
+                        </span>{" "}
+                        due 30 days before the trip
+                      </p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Card preview */}
             <div className="relative rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 p-5 text-white overflow-hidden">
@@ -400,19 +608,57 @@ function CheckoutContent() {
             <div className="rounded-2xl bg-white border p-4">
               <h2 className="font-bold text-sm mb-3">Price breakdown</h2>
               <div className="space-y-1.5 text-xs">
+                {type === "trip" && tripPricing ? (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      ${tripPricing.rate.toLocaleString()} × {tripTravelers}{" "}
+                      {tripTravelers === 1 ? "traveler" : "travelers"}
+                    </span>
+                    <span>{formatHotelPrice(subtotal)}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Subtotal</span>
+                    <span>{formatHotelPrice(subtotal)}</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Subtotal</span>
-                  <span>{formatHotelPrice(subtotal)}</span>
+                  <span className="text-muted-foreground">
+                    Tax ({formatRatePercent(breakdown.taxRate)})
+                  </span>
+                  <span>{formatHotelPrice(breakdown.tax)}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Taxes & fees</span>
-                  <span>{formatHotelPrice(taxes)}</span>
+                  <span className="text-muted-foreground">
+                    Platform fee ({formatRatePercent(breakdown.platformFeeRate)})
+                  </span>
+                  <span>{formatHotelPrice(breakdown.platformFee)}</span>
                 </div>
                 <Separator className="my-2" />
                 <div className="flex items-center justify-between font-bold">
                   <span>Total</span>
                   <span className="text-base">{formatHotelPrice(total)}</span>
                 </div>
+                {type === "trip" && paymentMode === "partial" && (
+                  <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-3 space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-amber-900 font-semibold">
+                        Due today ({Math.round(DEPOSIT_PERCENT * 100)}%)
+                      </span>
+                      <span className="font-bold text-amber-900">
+                        {formatHotelPrice(amountDueNow)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-amber-900/80">
+                        Due 30 days before trip
+                      </span>
+                      <span className="font-semibold text-amber-900/80">
+                        {formatHotelPrice(amountDueLater)}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -427,8 +673,21 @@ function CheckoutContent() {
       {/* Sticky bottom CTA */}
       <div className="sticky bottom-0 bg-white border-t p-4 md:pb-8">
         <div className="flex items-center justify-between mb-3">
-          <span className="text-xs text-muted-foreground">Total</span>
-          <span className="text-lg font-bold">{formatHotelPrice(total)}</span>
+          <span className="text-xs text-muted-foreground">
+            {type === "trip" && paymentMode === "partial"
+              ? "Due today"
+              : "Total"}
+          </span>
+          <div className="text-right">
+            <span className="text-lg font-bold block leading-none">
+              {formatHotelPrice(amountDueNow)}
+            </span>
+            {type === "trip" && paymentMode === "partial" && (
+              <span className="text-[10px] text-muted-foreground">
+                + {formatHotelPrice(amountDueLater)} due later
+              </span>
+            )}
+          </div>
         </div>
         {step < 3 ? (
           <Button
@@ -455,7 +714,9 @@ function CheckoutContent() {
             ) : (
               <>
                 <Lock className="h-4 w-4" />
-                Confirm and pay
+                {type === "trip" && paymentMode === "partial"
+                  ? `Pay deposit ${formatHotelPrice(amountDueNow)}`
+                  : `Confirm and pay`}
               </>
             )}
           </Button>

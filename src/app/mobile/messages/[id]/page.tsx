@@ -4,14 +4,14 @@ import { use, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Send, MoreVertical, Phone, Video } from "lucide-react";
+import { Send, Info, Phone, Users } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { MobileHeader } from "@/components/mobile/mobile-header";
 import { useConversations } from "@/hooks/use-conversations";
 import { CURRENT_USER } from "@/data/conversations";
 import { formatTime, formatDay } from "@/lib/format-time";
-import type { Message } from "@/types/messaging";
+import type { Message, Participant } from "@/types/messaging";
 import { cn } from "@/lib/utils";
 
 function groupByDay(msgs: Message[]) {
@@ -44,16 +44,22 @@ export default function MobileChatThreadPage({
   const conversation = getConversation(id);
   const msgs = useMemo(() => getMessages(id), [getMessages, id]);
   const grouped = useMemo(() => groupByDay(msgs), [msgs]);
+  const isGroup = !!conversation?.isGroup;
   const other = conversation?.participants.find((p) => p.id !== CURRENT_USER.id);
 
-  // Mark as read on open
+  // Build a participant lookup for rendering sender names/avatars in groups
+  const participantById = useMemo(() => {
+    const map = new Map<string, Participant>();
+    conversation?.participants.forEach((p) => map.set(p.id, p));
+    return map;
+  }, [conversation]);
+
   useEffect(() => {
     if (hydrated && conversation && conversation.unreadCount > 0) {
       markRead(id);
     }
   }, [hydrated, id, conversation, markRead]);
 
-  // Auto-scroll to bottom on new message
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
@@ -69,7 +75,7 @@ export default function MobileChatThreadPage({
     );
   }
 
-  if (!conversation || !other) {
+  if (!conversation || (!isGroup && !other)) {
     return (
       <div className="flex h-full min-h-[844px] flex-col">
         <MobileHeader title="Chat" />
@@ -95,6 +101,15 @@ export default function MobileChatThreadPage({
     setInput("");
   };
 
+  const headerTitle = isGroup
+    ? conversation.groupName || "Group"
+    : other!.name;
+  const headerSubtitle = isGroup
+    ? `${conversation.participants.length} members`
+    : other!.online
+    ? "Active now"
+    : "Your host";
+
   return (
     <div className="flex flex-col h-full min-h-[844px] bg-muted/10">
       {/* Header */}
@@ -119,36 +134,64 @@ export default function MobileChatThreadPage({
         </button>
 
         <Link
-          href="#"
+          href={isGroup ? `/mobile/messages/${id}/info` : "#"}
           className="flex items-center gap-2 flex-1 min-w-0"
         >
-          <div className="relative shrink-0">
-            <Image
-              src={other.avatar}
-              alt={other.name}
-              width={36}
-              height={36}
-              className="rounded-full object-cover h-9 w-9"
-            />
-            {other.online && (
-              <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500" />
-            )}
-          </div>
+          {isGroup ? (
+            <div className="relative h-9 w-9 shrink-0">
+              {conversation.groupImage ? (
+                <Image
+                  src={conversation.groupImage}
+                  alt={conversation.groupName || ""}
+                  fill
+                  className="object-cover rounded-xl"
+                  sizes="36px"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center rounded-xl bg-primary/10">
+                  <Users className="h-4 w-4 text-primary" />
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="relative shrink-0">
+              <Image
+                src={other!.avatar}
+                alt={other!.name}
+                width={36}
+                height={36}
+                className="rounded-full object-cover h-9 w-9"
+              />
+              {other!.online && (
+                <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500" />
+              )}
+            </div>
+          )}
           <div className="min-w-0">
-            <p className="font-bold text-sm truncate">{other.name}</p>
+            <p className="font-bold text-sm truncate flex items-center gap-1">
+              {headerTitle}
+              {isGroup && (
+                <Users className="h-3 w-3 text-muted-foreground shrink-0" />
+              )}
+            </p>
             <p className="text-[10px] text-muted-foreground truncate">
-              {other.online ? "Active now" : "Your host"}
+              {headerSubtitle}
               {conversation.tripTitle && ` · ${conversation.tripTitle}`}
             </p>
           </div>
         </Link>
 
-        <button className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-muted transition-colors">
-          <Phone className="h-4 w-4" />
-        </button>
-        <button className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-muted transition-colors">
-          <MoreVertical className="h-4 w-4" />
-        </button>
+        {!isGroup && (
+          <button className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-muted transition-colors">
+            <Phone className="h-4 w-4" />
+          </button>
+        )}
+        <Link
+          href={isGroup ? `/mobile/messages/${id}/info` : "#"}
+          className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-muted transition-colors"
+        >
+          <Info className="h-4 w-4" />
+        </Link>
       </header>
 
       {/* Trip context card */}
@@ -173,7 +216,10 @@ export default function MobileChatThreadPage({
       )}
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-4 space-y-4">
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto px-3 py-4 space-y-4"
+      >
         {grouped.map((group, gi) => (
           <div key={gi}>
             <div className="flex items-center justify-center mb-3">
@@ -190,6 +236,7 @@ export default function MobileChatThreadPage({
                   !prev || prev.senderId !== m.senderId;
                 const isLastInGroup =
                   !next || next.senderId !== m.senderId;
+                const sender = participantById.get(m.senderId);
 
                 return (
                   <div
@@ -201,9 +248,9 @@ export default function MobileChatThreadPage({
                   >
                     {!mine && (
                       <div className="h-6 w-6 shrink-0">
-                        {isLastInGroup && (
+                        {isLastInGroup && sender && (
                           <Image
-                            src={other.avatar}
+                            src={sender.avatar}
                             alt=""
                             width={24}
                             height={24}
@@ -212,41 +259,51 @@ export default function MobileChatThreadPage({
                         )}
                       </div>
                     )}
-                    <div
-                      className={cn(
-                        "max-w-[75%] px-3 py-2",
-                        mine
-                          ? "bg-primary text-white"
-                          : "bg-white border",
-                        // Rounded corners with tail on first/last
-                        isFirstInGroup && isLastInGroup
-                          ? mine
-                            ? "rounded-2xl rounded-br-sm"
-                            : "rounded-2xl rounded-bl-sm"
-                          : isFirstInGroup
-                          ? mine
-                            ? "rounded-2xl"
-                            : "rounded-2xl"
-                          : isLastInGroup
-                          ? mine
-                            ? "rounded-2xl rounded-br-sm"
-                            : "rounded-2xl rounded-bl-sm"
-                          : "rounded-2xl"
-                      )}
-                    >
-                      <p className="text-sm whitespace-pre-wrap break-words leading-snug">
-                        {m.text}
-                      </p>
-                      {isLastInGroup && (
-                        <p
-                          className={cn(
-                            "text-[9px] mt-0.5",
-                            mine ? "text-white/70" : "text-muted-foreground"
+                    <div className="flex flex-col max-w-[75%]">
+                      {/* Sender name in groups (first bubble of a group only) */}
+                      {!mine && isGroup && isFirstInGroup && sender && (
+                        <p className="text-[10px] font-semibold text-muted-foreground ml-3 mb-0.5">
+                          {sender.name}
+                          {sender.role === "host" && (
+                            <span className="ml-1 rounded-full bg-primary/10 text-primary px-1.5 py-[1px] text-[9px]">
+                              Host
+                            </span>
                           )}
-                        >
-                          {formatTime(m.createdAt)}
                         </p>
                       )}
+                      <div
+                        className={cn(
+                          "px-3 py-2",
+                          mine
+                            ? "bg-primary text-white"
+                            : "bg-white border",
+                          isFirstInGroup && isLastInGroup
+                            ? mine
+                              ? "rounded-2xl rounded-br-sm"
+                              : "rounded-2xl rounded-bl-sm"
+                            : isLastInGroup
+                            ? mine
+                              ? "rounded-2xl rounded-br-sm"
+                              : "rounded-2xl rounded-bl-sm"
+                            : "rounded-2xl"
+                        )}
+                      >
+                        <p className="text-sm whitespace-pre-wrap break-words leading-snug">
+                          {m.text}
+                        </p>
+                        {isLastInGroup && (
+                          <p
+                            className={cn(
+                              "text-[9px] mt-0.5",
+                              mine
+                                ? "text-white/70"
+                                : "text-muted-foreground"
+                            )}
+                          >
+                            {formatTime(m.createdAt)}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -265,7 +322,7 @@ export default function MobileChatThreadPage({
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Message..."
+            placeholder={isGroup ? `Message the group...` : "Message..."}
             className="h-11 rounded-full bg-muted/50 border-0 px-4"
           />
           <Button

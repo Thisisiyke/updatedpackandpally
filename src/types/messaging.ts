@@ -20,10 +20,15 @@ export interface Message {
 export interface Conversation {
   id: string;
   participants: Participant[];
+  tripId?: string;
   tripTitle?: string;
   tripImage?: string;
   lastMessage?: string;
   lastMessageAt?: string;
   lastSenderId?: string;
   unreadCount: number;
+  isGroup?: boolean;
+  groupName?: string;
+  groupImage?: string;
+  createdBy?: string;
 }

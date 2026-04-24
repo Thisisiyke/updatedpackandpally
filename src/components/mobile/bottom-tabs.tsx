@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Compass, Heart, Plane, User } from "lucide-react";
+import { Home, Compass, MapPin, Heart, Plane, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const tabs = [
   { href: "/mobile/home", label: "Home", icon: Home },
   { href: "/mobile/explore", label: "Explore", icon: Compass },
+  { href: "/mobile/map", label: "Map", icon: MapPin },
   { href: "/mobile/saved", label: "Saved", icon: Heart },
   { href: "/mobile/bookings", label: "Trips", icon: Plane },
   { href: "/mobile/profile", label: "Profile", icon: User },
@@ -18,7 +19,7 @@ export function BottomTabs() {
 
   return (
     <nav className="sticky bottom-0 z-40 bg-white border-t md:pb-6">
-      <div className="grid grid-cols-5">
+      <div className="grid grid-cols-6">
         {tabs.map((tab) => {
           const active = pathname?.startsWith(tab.href);
           return (

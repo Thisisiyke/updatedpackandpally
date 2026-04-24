@@ -84,8 +84,13 @@ export function PartnerSidebar() {
 
       <div className="border-t p-4 space-y-1">
         <Link
-          href="#"
-          className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          href="/partner/settings/terms"
+          className={cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+            pathname.startsWith("/partner/settings")
+              ? "bg-primary/10 text-primary"
+              : "text-muted-foreground hover:bg-accent hover:text-foreground"
+          )}
         >
           <Settings className="h-4 w-4" />
           Settings

@@ -14,6 +14,7 @@ import {
   Calendar,
   Users,
   MapPin,
+  MessageCircle,
   ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -249,6 +250,23 @@ export default function MobileConfirmationPage({
                   </p>
                 </div>
               </div>
+              {isTrip && (
+                <Link
+                  href="/mobile/messages"
+                  className="flex items-start gap-2 -mx-1 rounded-lg px-1 py-0.5 active:bg-muted/50 transition-colors"
+                >
+                  <MessageCircle className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-xs font-medium">
+                      You&apos;ve joined the trip group chat
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Meet your host and fellow travelers — say hi in Messages
+                    </p>
+                  </div>
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-1" />
+                </Link>
+              )}
             </div>
           </div>
 
