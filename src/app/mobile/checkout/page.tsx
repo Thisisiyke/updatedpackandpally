@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -31,6 +31,13 @@ import {
   calculatePriceBreakdown,
   formatRatePercent,
 } from "@/lib/trip-pricing";
+import {
+  computeInstallments,
+  installmentsEligible,
+  formatInstallmentDue,
+  daysUntilStart,
+  INSTALLMENTS_MIN_DAYS,
+} from "@/lib/installment-schedule";
 import { trips } from "@/data/trips";
 import { hosts } from "@/data/hosts";
 import { joinTripGroupChat } from "@/hooks/use-conversations";
@@ -69,6 +76,45 @@ function CheckoutContent() {
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [travelerIdFile, setTravelerIdFile] = useState<{
+    name: string;
+    dataUrl: string;
+    sizeBytes: number;
+    type: string;
+  } | null>(null);
+  const [idError, setIdError] = useState<string | null>(null);
+  const [socialLink, setSocialLink] = useState("");
+  const idInputRef = useRef<HTMLInputElement>(null);
+
+  const handleIdUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIdError(null);
+    const ok =
+      file.type === "application/pdf" ||
+      file.type.startsWith("image/") ||
+      /\.(pdf|jpg|jpeg|png|heic)$/i.test(file.name);
+    if (!ok) {
+      setIdError("Upload a PDF or image (JPG, PNG).");
+      if (idInputRef.current) idInputRef.current.value = "";
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setIdError("Keep it under 8 MB.");
+      if (idInputRef.current) idInputRef.current.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () =>
+      setTravelerIdFile({
+        name: file.name,
+        dataUrl: String(reader.result || ""),
+        sizeBytes: file.size,
+        type: file.type,
+      });
+    reader.readAsDataURL(file);
+    if (idInputRef.current) idInputRef.current.value = "";
+  };
 
   const [tripTravelers, setTripTravelers] = useState(1);
   const [paymentMode, setPaymentMode] = useState<"full" | "partial">("full");
@@ -97,6 +143,20 @@ function CheckoutContent() {
   const selectedRoom = selectedHotel?.roomTypes.find((r) => r.id === roomId) || selectedHotel?.roomTypes[0];
   const selectedTrip = type === "trip" ? trips.find((t) => t.id === tripId) : null;
 
+  // Force back to full when this trip's host enabled installments but the
+  // schedule can't be built (trip is too soon).
+  useEffect(() => {
+    if (
+      type === "trip" &&
+      selectedTrip?.partialPayment?.enabled &&
+      !installmentsEligible(selectedTrip.startDate) &&
+      paymentMode === "partial"
+    ) {
+      setPaymentMode("full");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTrip?.id]);
+
   const nights = type === "hotel" ? calculateNights(checkIn, checkOut) : 0;
 
   // For group trips, scale by traveler count and any tiered pricing on the trip
@@ -117,12 +177,35 @@ function CheckoutContent() {
   const breakdown = calculatePriceBreakdown(subtotal, selectedTrip?.taxRate);
   const taxes = breakdown.tax + breakdown.platformFee;
   const total = breakdown.total;
+
+  // Host opted into installments? Eligible only if the trip is far enough out.
+  const installmentsAllowed =
+    type === "trip" &&
+    !!selectedTrip?.partialPayment?.enabled &&
+    selectedTrip != null &&
+    installmentsEligible(selectedTrip.startDate);
+  const installmentsBlocked =
+    type === "trip" &&
+    !!selectedTrip?.partialPayment?.enabled &&
+    !!selectedTrip &&
+    !installmentsEligible(selectedTrip.startDate);
+  const installmentSchedule =
+    installmentsAllowed && selectedTrip
+      ? computeInstallments(total, selectedTrip.startDate)
+      : null;
+
   const amountDueNow =
     type === "trip" && paymentMode === "partial"
-      ? depositAmount(total)
+      ? installmentSchedule
+        ? installmentSchedule[0].amount
+        : depositAmount(total)
       : total;
   const amountDueLater =
-    type === "trip" && paymentMode === "partial" ? remainingAmount(total) : 0;
+    type === "trip" && paymentMode === "partial"
+      ? installmentSchedule
+        ? installmentSchedule[1].amount + installmentSchedule[2].amount
+        : remainingAmount(total)
+      : 0;
 
   if (!selectedFlight && !selectedHotel && !selectedTrip) {
     return (
@@ -147,7 +230,27 @@ function CheckoutContent() {
       bookingId,
       type,
       createdAt: new Date().toISOString(),
-      contact: { firstName, lastName, email, phone },
+      contact: {
+        firstName,
+        lastName,
+        email,
+        phone,
+        socialMediaUrl:
+          type === "trip" && selectedTrip?.requestSocialMedia && socialLink.trim()
+            ? socialLink.trim()
+            : undefined,
+        travelerId:
+          type === "trip" && selectedTrip?.requireTravelerId && travelerIdFile
+            ? {
+                name: travelerIdFile.name,
+                sizeBytes: travelerIdFile.sizeBytes,
+                type: travelerIdFile.type,
+                // dataUrl intentionally omitted from the saved booking to keep
+                // localStorage light; in production this would be uploaded
+                // server-side and only the URL/id stored.
+              }
+            : undefined,
+      },
       totalPrice: total,
       flight: selectedFlight || null,
       hotel: selectedHotel || null,
@@ -164,6 +267,16 @@ function CheckoutContent() {
       paymentMode: type === "trip" ? paymentMode : "full",
       amountPaidNow: amountDueNow,
       amountDueLater,
+      installments:
+        type === "trip" && paymentMode === "partial" && installmentSchedule
+          ? installmentSchedule.map((s) => ({
+              index: s.index,
+              label: s.label,
+              dueAt: s.dueAt,
+              amount: s.amount,
+              paid: s.index === 1,
+            }))
+          : null,
     };
 
     try {
@@ -330,6 +443,85 @@ function CheckoutContent() {
               </div>
             </div>
 
+            {/* Government ID upload — when host requires it */}
+            {type === "trip" && selectedTrip?.requireTravelerId && (
+              <div className="pt-4 border-t space-y-2">
+                <div>
+                  <Label className="text-xs">
+                    Government ID <span className="text-red-600">*</span>
+                  </Label>
+                  <p className="text-[10px] text-muted-foreground">
+                    Your host needs to verify each traveler. Upload a passport,
+                    driver&apos;s license, or national ID (PDF or photo).
+                  </p>
+                </div>
+                <input
+                  ref={idInputRef}
+                  type="file"
+                  accept="application/pdf,image/*,.pdf,.jpg,.jpeg,.png,.heic"
+                  onChange={handleIdUpload}
+                  className="hidden"
+                />
+                {travelerIdFile ? (
+                  <div className="rounded-xl border bg-muted/30 p-3 flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 shrink-0">
+                      <Check className="h-4 w-4 text-emerald-700" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold truncate">
+                        {travelerIdFile.name}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {(travelerIdFile.sizeBytes / 1024).toFixed(0)} KB ·
+                        Encrypted in transit
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setTravelerIdFile(null)}
+                      className="text-[11px] text-red-600 font-medium shrink-0"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => idInputRef.current?.click()}
+                    className="flex h-20 w-full flex-col items-center justify-center rounded-xl border-2 border-dashed text-xs text-muted-foreground gap-1 hover:border-primary/40 hover:text-foreground transition-colors"
+                  >
+                    Tap to upload ID
+                    <span className="text-[10px]">PDF or photo · up to 8 MB</span>
+                  </button>
+                )}
+                {idError && (
+                  <p className="text-[11px] text-red-600">{idError}</p>
+                )}
+              </div>
+            )}
+
+            {/* Social media link — when host asks for it */}
+            {type === "trip" && selectedTrip?.requestSocialMedia && (
+              <div className="pt-4 border-t space-y-1.5">
+                <Label className="text-xs">
+                  Social media profile{" "}
+                  <span className="text-muted-foreground font-normal">
+                    (optional)
+                  </span>
+                </Label>
+                <Input
+                  type="url"
+                  value={socialLink}
+                  onChange={(e) => setSocialLink(e.target.value)}
+                  placeholder="https://instagram.com/your_handle"
+                  className="h-11"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Helps your trip group recognize each other before the trip.
+                </p>
+              </div>
+            )}
+
             {/* Traveler count — trip bookings only */}
             {type === "trip" && selectedTrip && (
               <div className="pt-4 border-t space-y-2">
@@ -470,46 +662,130 @@ function CheckoutContent() {
                     </div>
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMode("partial")}
-                    className={cn(
-                      "w-full flex items-start gap-3 rounded-xl border p-3 text-left transition-all",
-                      paymentMode === "partial"
-                        ? "border-primary ring-2 ring-primary/20 bg-primary/5"
-                        : "hover:bg-muted/30"
-                    )}
-                  >
-                    <div
+                  {installmentsAllowed && installmentSchedule ? (
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMode("partial")}
                       className={cn(
-                        "flex h-5 w-5 items-center justify-center rounded-full border-2 shrink-0 mt-0.5",
+                        "w-full flex items-start gap-3 rounded-xl border p-3 text-left transition-all",
                         paymentMode === "partial"
-                          ? "border-primary bg-primary"
-                          : "border-muted-foreground/30"
+                          ? "border-primary ring-2 ring-primary/20 bg-primary/5"
+                          : "hover:bg-muted/30"
                       )}
                     >
-                      {paymentMode === "partial" && (
-                        <div className="h-2 w-2 rounded-full bg-white" />
-                      )}
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-bold">
-                          Pay {Math.round(DEPOSIT_PERCENT * 100)}% deposit
-                        </p>
-                        <span className="text-sm font-bold">
-                          ${depositAmount(total).toLocaleString()}
-                        </span>
+                      <div
+                        className={cn(
+                          "flex h-5 w-5 items-center justify-center rounded-full border-2 shrink-0 mt-0.5",
+                          paymentMode === "partial"
+                            ? "border-primary bg-primary"
+                            : "border-muted-foreground/30"
+                        )}
+                      >
+                        {paymentMode === "partial" && (
+                          <div className="h-2 w-2 rounded-full bg-white" />
+                        )}
                       </div>
-                      <p className="text-[10px] text-muted-foreground">
-                        Remaining{" "}
-                        <span className="font-semibold">
-                          ${remainingAmount(total).toLocaleString()}
-                        </span>{" "}
-                        due 30 days before the trip
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-bold">3 installments</p>
+                          <span className="text-sm font-bold">
+                            ${installmentSchedule[0].amount.toLocaleString()}{" "}
+                            today
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground">
+                          Split into 3 equal payments — see schedule below.
+                        </p>
+                        {paymentMode === "partial" && (
+                          <div className="mt-3 space-y-1.5">
+                            {installmentSchedule.map((s) => (
+                              <div
+                                key={s.index}
+                                className="flex items-center justify-between gap-2 rounded-md bg-white border px-2.5 py-1.5"
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary shrink-0">
+                                    {s.index}
+                                  </span>
+                                  <div className="min-w-0">
+                                    <p className="text-[11px] font-semibold leading-tight truncate">
+                                      {s.label}
+                                    </p>
+                                    <p className="text-[10px] text-muted-foreground leading-tight">
+                                      Due {formatInstallmentDue(s.dueAt)}
+                                    </p>
+                                  </div>
+                                </div>
+                                <p className="text-[11px] font-bold shrink-0">
+                                  ${s.amount.toLocaleString()}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  ) : !installmentsBlocked ? (
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMode("partial")}
+                      className={cn(
+                        "w-full flex items-start gap-3 rounded-xl border p-3 text-left transition-all",
+                        paymentMode === "partial"
+                          ? "border-primary ring-2 ring-primary/20 bg-primary/5"
+                          : "hover:bg-muted/30"
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "flex h-5 w-5 items-center justify-center rounded-full border-2 shrink-0 mt-0.5",
+                          paymentMode === "partial"
+                            ? "border-primary bg-primary"
+                            : "border-muted-foreground/30"
+                        )}
+                      >
+                        {paymentMode === "partial" && (
+                          <div className="h-2 w-2 rounded-full bg-white" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-bold">
+                            Pay {Math.round(DEPOSIT_PERCENT * 100)}% deposit
+                          </p>
+                          <span className="text-sm font-bold">
+                            ${depositAmount(total).toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground">
+                          Remaining{" "}
+                          <span className="font-semibold">
+                            ${remainingAmount(total).toLocaleString()}
+                          </span>{" "}
+                          due 30 days before the trip
+                        </p>
+                      </div>
+                    </button>
+                  ) : null}
+
+                  {installmentsBlocked && selectedTrip && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-900">
+                      <p className="font-semibold">
+                        Partial payment isn&apos;t available for this trip.
+                      </p>
+                      <p className="mt-0.5 leading-snug">
+                        The host enabled installments, but this trip is{" "}
+                        {(() => {
+                          const d = daysUntilStart(selectedTrip.startDate);
+                          return d <= 0
+                            ? "due"
+                            : `${d} day${d === 1 ? "" : "s"} away`;
+                        })()}{" "}
+                        — installments need at least {INSTALLMENTS_MIN_DAYS}{" "}
+                        days to schedule. Pay in full to confirm your spot.
                       </p>
                     </div>
-                  </button>
+                  )}
                 </div>
               </div>
             )}
@@ -696,7 +972,13 @@ function CheckoutContent() {
             onClick={() => setStep((step + 1) as any)}
             disabled={
               step === 1
-                ? !firstName || !lastName || !email || !phone
+                ? !firstName ||
+                  !lastName ||
+                  !email ||
+                  !phone ||
+                  (type === "trip" &&
+                    !!selectedTrip?.requireTravelerId &&
+                    !travelerIdFile)
                 : !cardNumber || !cardName || !expiry || !cvc
             }
           >

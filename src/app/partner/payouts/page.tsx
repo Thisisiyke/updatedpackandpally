@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import {
   DollarSign,
   TrendingUp,
@@ -9,11 +10,15 @@ import {
   ChevronRight,
   FileText,
   Banknote,
+  CheckCircle2,
+  ExternalLink,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { partnerPayouts, getPartnerStats } from "@/data/partner-listings";
+import { StripeAccountCard } from "@/components/partner/stripe-account-card";
 import { cn } from "@/lib/utils";
 
 function formatCurrency(amount: number) {
@@ -58,16 +63,35 @@ export default function PartnerPayoutsPage() {
     .filter((p) => p.status === "paid")
     .reduce((s, p) => s + p.amount, 0);
 
+  const [stripeAccountId, setStripeAccountId] = useState<string | null>(null);
+  const [stripeConnectedAt, setStripeConnectedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    setStripeAccountId(localStorage.getItem("packpally_stripe_account_id"));
+    setStripeConnectedAt(
+      localStorage.getItem("packpally_stripe_connected_at")
+    );
+  }, []);
+
   return (
     <div className="p-6 lg:p-10">
       {/* Header */}
-      <div className="mb-8">
+      <div className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
           Payouts
         </h1>
         <p className="mt-1 text-muted-foreground">
           Track your earnings and payment history
         </p>
+      </div>
+
+      {/* Stripe Connect account */}
+      <div className="mb-6">
+        <StripeAccountCard
+          accountId={stripeAccountId}
+          connectedAt={stripeConnectedAt}
+          variant="comfortable"
+        />
       </div>
 
       {/* Top cards */}

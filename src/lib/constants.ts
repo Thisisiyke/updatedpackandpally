@@ -11,6 +11,7 @@ export const navLinks = [
   { label: "Group Trips", href: "/browse-trips" },
   { label: "AI Features", href: "/ai-features" },
   { label: "Become a Host", href: "/become-a-host" },
+  { label: "FAQ", href: "/faq" },
 ];
 
 export const footerLinks = {
@@ -27,10 +28,10 @@ export const footerLinks = {
     { label: "Blog", href: "#" },
   ],
   support: [
-    { label: "Help Center", href: "#" },
+    { label: "FAQ", href: "/faq" },
+    { label: "Get the app", href: "/#get-the-app" },
+    { label: "Contact Us", href: "mailto:support@packandpally.com" },
     { label: "Safety", href: "#" },
-    { label: "Contact Us", href: "#" },
-    { label: "Cancellation Policy", href: "#" },
   ],
 };
 

@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MobileHeader } from "@/components/mobile/mobile-header";
 import { PartnerBottomTabs } from "@/components/mobile/partner-bottom-tabs";
+import { StripeAccountCard } from "@/components/partner/stripe-account-card";
 import { partnerTrips } from "@/data/partner-trips";
 import {
   getUserPartnerTrips,
@@ -155,49 +156,10 @@ export default function MobilePartnerPaymentsPage() {
 
         {/* Stripe account card */}
         <div className="px-5 mt-5">
-          <div className="rounded-2xl border bg-white p-4">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#635BFF]/10 shrink-0">
-                <CreditCard className="h-5 w-5 text-[#635BFF]" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <p className="font-bold text-sm">Stripe account</p>
-                  <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 gap-1 text-[9px]">
-                    <CheckCircle2 className="h-2.5 w-2.5" />
-                    Connected
-                  </Badge>
-                </div>
-                <p className="text-[10px] text-muted-foreground font-mono mt-0.5 truncate">
-                  {stripeAccountId || "acct_•••••••••••"}
-                </p>
-                {stripeConnectedAt && (
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    Connected{" "}
-                    {new Date(stripeConnectedAt).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
-                  </p>
-                )}
-              </div>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full mt-3 gap-1.5"
-              onClick={() => {
-                // Simulate opening Stripe dashboard
-                window.alert(
-                  "In production, this opens dashboard.stripe.com to manage your account."
-                );
-              }}
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              Manage in Stripe
-            </Button>
-          </div>
+          <StripeAccountCard
+            accountId={stripeAccountId}
+            connectedAt={stripeConnectedAt}
+          />
         </div>
 
         {/* Per-trip breakdown */}

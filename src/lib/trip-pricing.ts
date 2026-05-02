@@ -49,7 +49,7 @@ export function remainingAmount(total: number): number {
  *   • Platform fee — always 6%, Pack & Pally's cut. Non-configurable.
  */
 export const TAX_RATE_DEFAULT = 0.0825;
-export const PLATFORM_FEE_RATE = 0.06;
+export const PLATFORM_FEE_RATE = 0.03;
 
 export interface PriceBreakdown {
   subtotal: number;

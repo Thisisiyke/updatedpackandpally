@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import {
   Plus,
   Sparkles,
@@ -14,6 +15,8 @@ import {
   ChevronRight,
   Compass,
   Bell,
+  Trash2,
+  RotateCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,8 +25,12 @@ import { PartnerBottomTabs } from "@/components/mobile/partner-bottom-tabs";
 import { partnerTrips } from "@/data/partner-trips";
 import {
   getUserPartnerTrips,
+  getHiddenTripIds,
+  deleteUserPartnerTrip,
+  saveUserPartnerTrip,
   subscribeToUserPartnerTrips,
 } from "@/lib/user-partner-trips";
+import type { PartnerTrip } from "@/data/partner-trips";
 import {
   countUnreadBookings,
   subscribeToPartnerNotifications,
@@ -40,14 +47,20 @@ function formatMoney(n: number) {
 }
 
 export default function MobilePartnerDashboard() {
+  const router = useRouter();
   const [userTrips, setUserTrips] = useState(getUserPartnerTrips());
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [unread, setUnread] = useState(0);
+  const [tripTab, setTripTab] = useState<"my" | "completed">("my");
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     setUserTrips(getUserPartnerTrips());
+    setHiddenIds(getHiddenTripIds());
     setUnread(countUnreadBookings());
     const refresh = () => {
       setUserTrips(getUserPartnerTrips());
+      setHiddenIds(getHiddenTripIds());
       setUnread(countUnreadBookings());
     };
     const unsubA = subscribeToUserPartnerTrips(refresh);
@@ -59,11 +72,61 @@ export default function MobilePartnerDashboard() {
   }, []);
 
   // Merge user-created trips with seed partner trips (user ones first)
+  // and drop anything the host has soft-deleted.
   const allTrips = useMemo(() => {
     const userIds = new Set(userTrips.map((t) => t.id));
     const seed = partnerTrips.filter((t) => !userIds.has(t.id));
-    return [...userTrips, ...seed];
-  }, [userTrips]);
+    return [...userTrips, ...seed].filter((t) => !hiddenIds.has(t.id));
+  }, [userTrips, hiddenIds]);
+
+  // Split: completed = trip endDate is in the past
+  const todayMs = Date.now();
+  const myTrips = allTrips.filter(
+    (t) => new Date(t.endDate).getTime() >= todayMs
+  );
+  const completedTrips = allTrips.filter(
+    (t) => new Date(t.endDate).getTime() < todayMs
+  );
+  const visibleTrips = tripTab === "my" ? myTrips : completedTrips;
+
+  const handleDelete = (trip: PartnerTrip) => {
+    if (
+      !confirm(
+        `Delete "${trip.title}"? This removes it from your dashboard. Travelers who already booked won't be affected in this demo.`
+      )
+    )
+      return;
+    deleteUserPartnerTrip(trip.id);
+    setToast("Trip deleted");
+    setTimeout(() => setToast(null), 2200);
+  };
+
+  const handleRecreate = (trip: PartnerTrip) => {
+    const now = new Date();
+    const start = new Date(now);
+    start.setDate(start.getDate() + 60);
+    const end = new Date(start);
+    end.setDate(end.getDate() + (trip.durationDays || 7));
+    const newId = `utrip-${Date.now()}`;
+    const cloned: PartnerTrip = {
+      ...trip,
+      id: newId,
+      slug: `${trip.slug || "trip"}-${Date.now()}`,
+      title: `${trip.title} (copy)`,
+      status: "draft",
+      currentBookings: 0,
+      revenue: 0,
+      rating: 0,
+      reviewCount: 0,
+      startDate: start.toISOString().slice(0, 10),
+      endDate: end.toISOString().slice(0, 10),
+      createdAt: new Date().toISOString(),
+    };
+    saveUserPartnerTrip(cloned);
+    setToast("Trip recreated as a draft");
+    setTimeout(() => setToast(null), 2400);
+    router.push(`/mobile/partner/trips/${newId}`);
+  };
 
   const stats = useMemo(() => {
     const published = allTrips.filter((t) => t.status === "published").length;
@@ -154,12 +217,53 @@ export default function MobilePartnerDashboard() {
             </span>
           </div>
 
-          {allTrips.length === 0 ? (
-            <EmptyState />
+          {/* My / Completed tabs */}
+          <div className="mb-3 grid grid-cols-2 gap-1 rounded-lg border bg-muted/40 p-1">
+            <button
+              type="button"
+              onClick={() => setTripTab("my")}
+              className={cn(
+                "rounded-md py-1.5 text-xs font-semibold transition-colors",
+                tripTab === "my"
+                  ? "bg-white shadow-sm"
+                  : "text-muted-foreground"
+              )}
+            >
+              My trips ({myTrips.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setTripTab("completed")}
+              className={cn(
+                "rounded-md py-1.5 text-xs font-semibold transition-colors",
+                tripTab === "completed"
+                  ? "bg-white shadow-sm"
+                  : "text-muted-foreground"
+              )}
+            >
+              Completed ({completedTrips.length})
+            </button>
+          </div>
+
+          {visibleTrips.length === 0 ? (
+            tripTab === "completed" ? (
+              <div className="rounded-2xl border border-dashed bg-white p-6 text-center text-xs text-muted-foreground">
+                No completed trips yet — once a trip&apos;s end date passes,
+                it&apos;ll move here.
+              </div>
+            ) : (
+              <EmptyState />
+            )
           ) : (
             <div className="space-y-3">
-              {allTrips.map((trip) => (
-                <TripRow key={trip.id} trip={trip} />
+              {visibleTrips.map((trip) => (
+                <TripRow
+                  key={trip.id}
+                  trip={trip}
+                  variant={tripTab === "my" ? "active" : "completed"}
+                  onDelete={() => handleDelete(trip)}
+                  onRecreate={() => handleRecreate(trip)}
+                />
               ))}
             </div>
           )}
@@ -194,6 +298,12 @@ export default function MobilePartnerDashboard() {
           </Link>
         </Button>
       </div>
+
+      {toast && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-full bg-emerald-500 px-4 py-2 text-xs font-medium text-white shadow-lg animate-[fade-in-up_300ms_ease-out]">
+          {toast}
+        </div>
+      )}
 
       <PartnerBottomTabs />
     </div>
@@ -244,72 +354,121 @@ function EmptyState() {
 
 function TripRow({
   trip,
+  variant,
+  onDelete,
+  onRecreate,
 }: {
   trip: (typeof partnerTrips)[number];
+  variant: "active" | "completed";
+  onDelete: () => void;
+  onRecreate: () => void;
 }) {
   const fillPct = trip.maxGroupSize
     ? (trip.currentBookings / trip.maxGroupSize) * 100
     : 0;
   return (
-    <Link
-      href={`/mobile/partner/trips/${trip.id}`}
-      className="flex gap-3 rounded-2xl bg-white border p-3"
-    >
-      <div className="relative h-16 w-16 overflow-hidden rounded-xl shrink-0 bg-muted">
-        <Image
-          src={trip.coverImage}
-          alt={trip.title}
-          fill
-          sizes="64px"
-          className="object-cover"
-        />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 mb-0.5">
-          <Badge
-            className={cn(
-              "text-[9px] shrink-0 gap-1",
-              trip.status === "published" &&
-                "bg-emerald-100 text-emerald-800 border-emerald-200",
-              trip.status === "draft" && "bg-muted text-muted-foreground",
-              trip.status === "sold-out" &&
-                "bg-amber-100 text-amber-800 border-amber-200"
+    <div className="rounded-2xl bg-white border overflow-hidden">
+      <Link
+        href={`/mobile/partner/trips/${trip.id}`}
+        className="flex gap-3 p-3"
+      >
+        <div className="relative h-16 w-16 overflow-hidden rounded-xl shrink-0 bg-muted">
+          <Image
+            src={trip.coverImage}
+            alt={trip.title}
+            fill
+            sizes="64px"
+            className="object-cover"
+          />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <Badge
+              className={cn(
+                "text-[9px] shrink-0 gap-1",
+                variant === "completed" &&
+                  "bg-blue-100 text-blue-800 border-blue-200",
+                variant === "active" &&
+                  trip.status === "published" &&
+                  "bg-emerald-100 text-emerald-800 border-emerald-200",
+                variant === "active" &&
+                  trip.status === "draft" &&
+                  "bg-muted text-muted-foreground",
+                variant === "active" &&
+                  trip.status === "sold-out" &&
+                  "bg-amber-100 text-amber-800 border-amber-200"
+              )}
+            >
+              {variant === "completed"
+                ? "Completed"
+                : trip.status === "sold-out"
+                ? "Sold out"
+                : trip.status}
+            </Badge>
+            {trip.rating > 0 && (
+              <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" />
+                {trip.rating}
+              </span>
             )}
-          >
-            {trip.status === "sold-out" ? "Sold out" : trip.status}
-          </Badge>
-          {trip.rating > 0 && (
-            <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
-              <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" />
-              {trip.rating}
-            </span>
-          )}
-        </div>
-        <p className="font-semibold text-sm leading-tight line-clamp-1">
-          {trip.title}
-        </p>
-        <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
-          <Calendar className="h-2.5 w-2.5" />
-          {new Date(trip.startDate).toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-          })}
-          {" · "}
-          {trip.durationDays}d
-        </p>
-        <div className="mt-1.5 flex items-center gap-2">
-          <div className="h-1 flex-1 rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full bg-primary"
-              style={{ width: `${fillPct}%` }}
-            />
           </div>
-          <span className="text-[10px] font-medium text-muted-foreground shrink-0">
-            {trip.currentBookings}/{trip.maxGroupSize}
-          </span>
+          <p className="font-semibold text-sm leading-tight line-clamp-1">
+            {trip.title}
+          </p>
+          <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+            <Calendar className="h-2.5 w-2.5" />
+            {new Date(trip.startDate).toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+            })}
+            {" · "}
+            {trip.durationDays}d
+          </p>
+          <div className="mt-1.5 flex items-center gap-2">
+            <div className="h-1 flex-1 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full bg-primary"
+                style={{ width: `${fillPct}%` }}
+              />
+            </div>
+            <span className="text-[10px] font-medium text-muted-foreground shrink-0">
+              {trip.currentBookings}/{trip.maxGroupSize}
+            </span>
+          </div>
         </div>
+        <ChevronRight className="h-4 w-4 text-muted-foreground self-center shrink-0" />
+      </Link>
+
+      {/* Per-tab action footer */}
+      <div className="border-t flex">
+        {variant === "active" ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-semibold text-red-600 hover:bg-red-50 transition-colors"
+          >
+            <Trash2 className="h-3 w-3" />
+            Delete trip
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onRecreate();
+            }}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-semibold text-primary hover:bg-primary/5 transition-colors"
+          >
+            <RotateCw className="h-3 w-3" />
+            Recreate trip
+          </button>
+        )}
       </div>
-      <ChevronRight className="h-4 w-4 text-muted-foreground self-center shrink-0" />
-    </Link>
+    </div>
   );
 }

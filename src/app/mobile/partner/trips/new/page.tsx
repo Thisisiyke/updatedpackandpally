@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
@@ -18,6 +18,9 @@ import {
   Calendar,
   ClipboardList,
   PartyPopper,
+  FileText,
+  Upload,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +29,13 @@ import { MobileHeader } from "@/components/mobile/mobile-header";
 import { generatePartnerTrip } from "@/lib/ai/partner-trip-generator";
 import { tripCategories, type PartnerTrip } from "@/data/partner-trips";
 import { saveUserPartnerTrip } from "@/lib/user-partner-trips";
+import {
+  computeInstallments,
+  daysUntilStart,
+  formatInstallmentDue,
+  installmentsEligible,
+  INSTALLMENTS_MIN_DAYS,
+} from "@/lib/installment-schedule";
 import { CURRENT_PARTNER_HOST_ID } from "@/lib/host-terms";
 import { cn } from "@/lib/utils";
 
@@ -88,6 +98,104 @@ export default function MobileCreateTripPage() {
   // Step 5
   const [price, setPrice] = useState(1999);
   const [taxRatePct, setTaxRatePct] = useState("8.25");
+  const [installmentsEnabled, setInstallmentsEnabled] = useState(false);
+  const [useTieredPricing, setUseTieredPricing] = useState(false);
+  const [priceSolo, setPriceSolo] = useState(2499);
+  const [priceCouple, setPriceCouple] = useState(2199);
+  const [priceGroupOf3, setPriceGroupOf3] = useState(1899);
+
+  // Cover + gallery photos
+  const [coverImage, setCoverImage] = useState<string | null>(null);
+  const [galleryImages, setGalleryImages] = useState<string[]>([]);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+
+  const handleCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoError(null);
+    if (!file.type.startsWith("image/")) {
+      setPhotoError("Cover must be an image.");
+      if (coverInputRef.current) coverInputRef.current.value = "";
+      return;
+    }
+    if (file.size > 6 * 1024 * 1024) {
+      setPhotoError("Keep cover photos under 6 MB.");
+      if (coverInputRef.current) coverInputRef.current.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setCoverImage(String(reader.result || ""));
+    reader.readAsDataURL(file);
+    if (coverInputRef.current) coverInputRef.current.value = "";
+  };
+
+  const handleGalleryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setPhotoError(null);
+    const valid = files.filter(
+      (f) => f.type.startsWith("image/") && f.size <= 6 * 1024 * 1024
+    );
+    if (valid.length === 0) {
+      setPhotoError("Pick image files under 6 MB each.");
+      if (galleryInputRef.current) galleryInputRef.current.value = "";
+      return;
+    }
+    const remaining = Math.max(0, 8 - galleryImages.length);
+    const take = valid.slice(0, remaining);
+    Promise.all(
+      take.map(
+        (f) =>
+          new Promise<string>((resolve) => {
+            const r = new FileReader();
+            r.onload = () => resolve(String(r.result || ""));
+            r.readAsDataURL(f);
+          })
+      )
+    ).then((urls) => {
+      setGalleryImages((prev) => [...prev, ...urls].slice(0, 8));
+    });
+    if (galleryInputRef.current) galleryInputRef.current.value = "";
+  };
+  const [requireTravelerId, setRequireTravelerId] = useState(false);
+  const [requestSocialMedia, setRequestSocialMedia] = useState(false);
+
+  // Trip + host policies (step 5)
+  const [tripPolicyPdf, setTripPolicyPdf] = useState<{
+    name: string;
+    dataUrl: string;
+    sizeBytes: number;
+  } | null>(null);
+  const [hostPolicy, setHostPolicy] = useState("");
+  const pdfInputRef = useRef<HTMLInputElement>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
+  const handlePdfUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPdfError(null);
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      setPdfError("File must be a PDF.");
+      if (pdfInputRef.current) pdfInputRef.current.value = "";
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setPdfError("Keep it under 5 MB so it loads fast for travelers.");
+      if (pdfInputRef.current) pdfInputRef.current.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () =>
+      setTripPolicyPdf({
+        name: file.name,
+        dataUrl: String(reader.result || ""),
+        sizeBytes: file.size,
+      });
+    reader.readAsDataURL(file);
+    if (pdfInputRef.current) pdfInputRef.current.value = "";
+  };
 
   // Step 6
   const [publishing, setPublishing] = useState(false);
@@ -173,13 +281,28 @@ export default function MobileCreateTripPage() {
       country: country.trim(),
       category: categories,
       difficulty,
-      coverImage: FALLBACK_COVER,
-      images: [FALLBACK_COVER],
+      coverImage: coverImage || galleryImages[0] || FALLBACK_COVER,
+      images:
+        galleryImages.length > 0
+          ? galleryImages
+          : coverImage
+          ? [coverImage]
+          : [FALLBACK_COVER],
       startDate,
       endDate,
       durationDays: durationForTrip,
       price,
+      priceTiers: useTieredPricing
+        ? { solo: priceSolo, couple: priceCouple, groupOf3: priceGroupOf3 }
+        : undefined,
       taxRate: Number(taxRatePct) / 100,
+      partialPayment: installmentsEnabled
+        ? { enabled: true, splits: [0.3334, 0.3333, 0.3333] }
+        : undefined,
+      requireTravelerId: requireTravelerId || undefined,
+      requestSocialMedia: requestSocialMedia || undefined,
+      tripPolicyPdf: tripPolicyPdf || undefined,
+      hostPolicy: hostPolicy.trim() || undefined,
       currency: "USD",
       maxGroupSize,
       currentBookings: 0,
@@ -391,6 +514,122 @@ export default function MobileCreateTripPage() {
                 <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
               )}
             </button>
+
+            {/* Photos */}
+            <div className="rounded-2xl border bg-white p-4 space-y-3">
+              <div>
+                <p className="font-bold text-sm">Photos</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Add a cover photo and up to 8 trip photos. Travelers see
+                  these on the trip page.
+                </p>
+              </div>
+
+              {/* Cover */}
+              <div>
+                <p className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground mb-1.5">
+                  Cover photo
+                </p>
+                <input
+                  ref={coverInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleCoverUpload}
+                  className="hidden"
+                />
+                {coverImage ? (
+                  <div className="relative h-36 w-full overflow-hidden rounded-xl">
+                    <Image
+                      src={coverImage}
+                      alt="Cover"
+                      fill
+                      className="object-cover"
+                      sizes="400px"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setCoverImage(null)}
+                      className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white"
+                      aria-label="Remove cover"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => coverInputRef.current?.click()}
+                      className="absolute bottom-2 right-2 rounded-full bg-white/90 text-[11px] font-semibold px-3 py-1 shadow-sm"
+                    >
+                      Change
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => coverInputRef.current?.click()}
+                    className="flex h-32 w-full flex-col items-center justify-center rounded-xl border-2 border-dashed text-xs text-muted-foreground gap-1 hover:border-primary/40 hover:text-foreground transition-colors"
+                  >
+                    Tap to upload cover
+                    <span className="text-[10px]">JPG / PNG · up to 6 MB</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Gallery */}
+              <div>
+                <p className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground mb-1.5">
+                  Gallery ({galleryImages.length}/8)
+                </p>
+                <input
+                  ref={galleryInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleGalleryUpload}
+                  className="hidden"
+                />
+                <div className="grid grid-cols-3 gap-2">
+                  {galleryImages.map((src, i) => (
+                    <div
+                      key={i}
+                      className="relative aspect-square overflow-hidden rounded-lg"
+                    >
+                      <Image
+                        src={src}
+                        alt={`Photo ${i + 1}`}
+                        fill
+                        sizes="120px"
+                        className="object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setGalleryImages((prev) =>
+                            prev.filter((_, idx) => idx !== i)
+                          )
+                        }
+                        className="absolute top-1 right-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white"
+                        aria-label="Remove photo"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                  {galleryImages.length < 8 && (
+                    <button
+                      type="button"
+                      onClick={() => galleryInputRef.current?.click()}
+                      className="flex aspect-square items-center justify-center rounded-lg border-2 border-dashed text-muted-foreground hover:border-primary/40 hover:text-foreground transition-colors"
+                    >
+                      <Plus className="h-5 w-5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {photoError && (
+                <p className="text-[11px] text-red-600">{photoError}</p>
+              )}
+            </div>
           </div>
         )}
 
@@ -627,25 +866,113 @@ export default function MobileCreateTripPage() {
               </p>
             </div>
 
-            <div className="rounded-2xl border bg-white p-4">
-              <Label className="text-xs">Price per person</Label>
-              <div className="relative mt-1">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                  $
-                </span>
-                <Input
-                  type="number"
-                  value={price}
-                  onChange={(e) => setPrice(Number(e.target.value))}
-                  className="pl-7 text-2xl font-bold h-14"
-                />
+            <div className="rounded-2xl border bg-white p-4 space-y-3">
+              {/* Flat / Tiered toggle */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setUseTieredPricing(false)}
+                  className={cn(
+                    "rounded-lg border py-2 text-xs font-semibold",
+                    !useTieredPricing
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "text-muted-foreground"
+                  )}
+                >
+                  Flat price
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUseTieredPricing(true)}
+                  className={cn(
+                    "rounded-lg border py-2 text-xs font-semibold",
+                    useTieredPricing
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "text-muted-foreground"
+                  )}
+                >
+                  Tiered (group rate)
+                </button>
               </div>
-              <p className="mt-2 text-[11px] text-muted-foreground">
-                Earnings for a full trip of {maxGroupSize} people:{" "}
-                <span className="font-bold text-foreground">
-                  ${(price * maxGroupSize).toLocaleString()}
-                </span>
-              </p>
+
+              {!useTieredPricing ? (
+                <>
+                  <Label className="text-xs">Price per person</Label>
+                  <div className="relative mt-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                      $
+                    </span>
+                    <Input
+                      type="number"
+                      value={price}
+                      onChange={(e) => setPrice(Number(e.target.value))}
+                      className="pl-7 text-2xl font-bold h-14"
+                    />
+                  </div>
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    Earnings for a full trip of {maxGroupSize} people:{" "}
+                    <span className="font-bold text-foreground">
+                      ${(price * maxGroupSize).toLocaleString()}
+                    </span>
+                  </p>
+                </>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    Travelers see a lower per-person rate as the group grows.
+                    Larger groups pay less; you earn more overall.
+                  </p>
+                  {[
+                    {
+                      label: "Solo",
+                      hint: "1 traveler",
+                      value: priceSolo,
+                      setter: setPriceSolo,
+                    },
+                    {
+                      label: "Couple",
+                      hint: "2 travelers",
+                      value: priceCouple,
+                      setter: setPriceCouple,
+                    },
+                    {
+                      label: "Group",
+                      hint: "3+ travelers",
+                      value: priceGroupOf3,
+                      setter: setPriceGroupOf3,
+                    },
+                  ].map((tier) => (
+                    <div
+                      key={tier.label}
+                      className="flex items-center gap-3 rounded-lg border p-2.5"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold">{tier.label}</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {tier.hint}
+                        </p>
+                      </div>
+                      <div className="relative w-28 shrink-0">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                          $
+                        </span>
+                        <Input
+                          type="number"
+                          value={tier.value}
+                          onChange={(e) =>
+                            tier.setter(Number(e.target.value))
+                          }
+                          className="pl-7 h-9 text-right font-semibold"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-2.5 text-[11px] text-emerald-900">
+                    💡 The group rate auto-applies to everyone once the trip
+                    has 3+ travelers.
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="rounded-2xl border bg-white p-4">
@@ -665,8 +992,157 @@ export default function MobileCreateTripPage() {
                 </span>
               </div>
               <p className="mt-2 text-[11px] text-muted-foreground">
-                Pack &amp; Pally&apos;s 6% platform fee is added automatically.
+                Pack &amp; Pally&apos;s 3% platform fee is added automatically.
               </p>
+            </div>
+
+            {/* Allow partial payment (installments) */}
+            <div className="rounded-2xl border bg-white p-4 space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="flex-1">
+                  <p className="font-bold text-sm">Allow partial payment</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Travelers split the price into 3 equal installments
+                    scheduled before the trip starts.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={installmentsEnabled}
+                  onClick={() => setInstallmentsEnabled((v) => !v)}
+                  className={cn(
+                    "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+                    installmentsEnabled
+                      ? "bg-primary"
+                      : "bg-muted-foreground/25"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform",
+                      installmentsEnabled
+                        ? "translate-x-5"
+                        : "translate-x-0.5"
+                    )}
+                  />
+                </button>
+              </div>
+
+              {installmentsEnabled && (
+                <InstallmentPreview
+                  totalPerPerson={price}
+                  startDate={startDate}
+                />
+              )}
+            </div>
+
+            {/* Trip policy PDF */}
+            <div className="rounded-2xl border bg-white p-4 space-y-3">
+              <div className="flex items-start gap-2">
+                <FileText className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-bold text-sm">Trip policy (PDF)</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Upload your trip&apos;s formal policy document — refunds,
+                    waivers, code of conduct, etc. Travelers can download it
+                    before joining.
+                  </p>
+                </div>
+              </div>
+
+              <input
+                ref={pdfInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                onChange={handlePdfUpload}
+                className="hidden"
+              />
+
+              {tripPolicyPdf ? (
+                <div className="rounded-xl border bg-muted/30 p-3 flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-100 shrink-0">
+                    <FileText className="h-4 w-4 text-red-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold truncate">
+                      {tripPolicyPdf.name}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {(tripPolicyPdf.sizeBytes / 1024).toFixed(0)} KB · PDF
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setTripPolicyPdf(null)}
+                    className="h-8 w-8 shrink-0 text-muted-foreground hover:text-red-600"
+                    aria-label="Remove PDF"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => pdfInputRef.current?.click()}
+                  className="flex h-24 w-full flex-col items-center justify-center rounded-xl border-2 border-dashed text-xs text-muted-foreground gap-1.5 hover:border-primary/40 hover:text-foreground transition-colors"
+                >
+                  <Upload className="h-4 w-4" />
+                  Tap to upload PDF
+                  <span className="text-[10px]">Up to 5 MB</span>
+                </button>
+              )}
+
+              {pdfError && (
+                <p className="text-[11px] text-red-600">{pdfError}</p>
+              )}
+            </div>
+
+            {/* Host policy text */}
+            <div className="rounded-2xl border bg-white p-4 space-y-2">
+              <div>
+                <Label className="text-xs font-bold">Host policy</Label>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Your house rules, expectations, or anything specific to how
+                  you run trips. Travelers see this on the trip page.
+                </p>
+              </div>
+              <textarea
+                value={hostPolicy}
+                onChange={(e) => setHostPolicy(e.target.value)}
+                placeholder="e.g. Be on time at every meeting point. No drugs or substance abuse on the trip. Travel insurance strongly recommended…"
+                rows={5}
+                maxLength={1500}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              />
+              <p className="text-[10px] text-muted-foreground text-right">
+                {hostPolicy.length}/1500
+              </p>
+            </div>
+
+            {/* Guest data — host opt-ins surfaced at traveler checkout */}
+            <div className="rounded-2xl border bg-white p-4 space-y-3">
+              <div>
+                <p className="font-bold text-sm">Guest data at checkout</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Choose what to ask travelers when they book.
+                </p>
+              </div>
+
+              <GuestToggle
+                title="Require government ID"
+                hint="Travelers must upload a passport, driver's license, or national ID before they can book."
+                checked={requireTravelerId}
+                onToggle={() => setRequireTravelerId((v) => !v)}
+              />
+              <GuestToggle
+                title="Ask for a social media profile"
+                hint="Optional — travelers can paste an Instagram, LinkedIn, or other profile URL so the group recognizes each other."
+                checked={requestSocialMedia}
+                onToggle={() => setRequestSocialMedia((v) => !v)}
+              />
             </div>
           </div>
         )}
@@ -756,6 +1232,20 @@ export default function MobileCreateTripPage() {
                   {notIncluded.length}
                 </span>{" "}
                 exclusions listed.
+              </p>
+              <p>
+                Trip policy PDF:{" "}
+                <span className="font-semibold text-foreground">
+                  {tripPolicyPdf ? tripPolicyPdf.name : "Not attached"}
+                </span>
+              </p>
+              <p>
+                Host policy:{" "}
+                <span className="font-semibold text-foreground">
+                  {hostPolicy.trim()
+                    ? `${Math.min(hostPolicy.trim().length, 1500)} chars`
+                    : "Not added"}
+                </span>
               </p>
             </div>
           </div>
@@ -909,6 +1399,100 @@ function ItemList({
           Add
         </Button>
       </div>
+    </div>
+  );
+}
+
+function GuestToggle({
+  title,
+  hint,
+  checked,
+  onToggle,
+}: {
+  title: string;
+  hint: string;
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border bg-muted/20 p-3">
+      <div className="flex-1">
+        <p className="text-xs font-semibold">{title}</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug">
+          {hint}
+        </p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={onToggle}
+        className={cn(
+          "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+          checked ? "bg-primary" : "bg-muted-foreground/25"
+        )}
+      >
+        <span
+          className={cn(
+            "inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform",
+            checked ? "translate-x-5" : "translate-x-0.5"
+          )}
+        />
+      </button>
+    </div>
+  );
+}
+
+function InstallmentPreview({
+  totalPerPerson,
+  startDate,
+}: {
+  totalPerPerson: number;
+  startDate: string;
+}) {
+  if (!startDate) {
+    return (
+      <p className="text-[11px] text-muted-foreground italic">
+        Pick a trip start date to preview the installment schedule.
+      </p>
+    );
+  }
+  if (!installmentsEligible(startDate)) {
+    const days = daysUntilStart(startDate);
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-900">
+        Installments need at least {INSTALLMENTS_MIN_DAYS} days before the trip
+        starts. This trip is {days <= 0 ? "due" : `${days} day${days === 1 ? "" : "s"} away`} —
+        travelers will be asked to pay in full at checkout.
+      </div>
+    );
+  }
+  const schedule = computeInstallments(totalPerPerson, startDate);
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+        Per-person schedule
+      </p>
+      {schedule.map((s) => (
+        <div
+          key={s.index}
+          className="rounded-lg border bg-muted/20 p-3 flex items-center gap-3"
+        >
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-[11px] font-bold text-primary shrink-0">
+            {s.index}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold truncate">{s.label}</p>
+            <p className="text-[10px] text-muted-foreground">
+              Due {formatInstallmentDue(s.dueAt)} ·{" "}
+              {Math.round(s.percent * 100)}%
+            </p>
+          </div>
+          <p className="font-bold text-sm shrink-0">
+            ${s.amount.toLocaleString()}
+          </p>
+        </div>
+      ))}
     </div>
   );
 }

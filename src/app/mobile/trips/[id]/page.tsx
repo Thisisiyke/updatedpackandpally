@@ -53,6 +53,7 @@ export default function MobileTripDetail({
   const [termsOpen, setTermsOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [hostTerms, setHostTerms] = useState<HostTerms | null>(null);
+  const [shareToast, setShareToast] = useState<string | null>(null);
 
   const trip = trips.find((t) => t.id === id);
   const host = trip ? hosts.find((h) => h.id === trip.hostId) : null;
@@ -92,6 +93,31 @@ export default function MobileTripDetail({
     router.push(`/mobile/checkout?type=trip&tripId=${trip.id}`);
   };
 
+  const handleShare = async () => {
+    if (typeof window === "undefined") return;
+    const url = `${window.location.origin}/trips/${trip.id}`;
+    const shareData = {
+      title: `${trip.title} · Pack & Pally`,
+      text: `Check out ${trip.title} in ${trip.destination}, ${trip.country} on Pack & Pally — join me?`,
+      url,
+    };
+    try {
+      if (typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share(shareData);
+        return;
+      }
+    } catch {
+      // user dismissed share sheet — fall through to copy
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareToast("Link copied to clipboard");
+    } catch {
+      setShareToast(url);
+    }
+    setTimeout(() => setShareToast(null), 2400);
+  };
+
   return (
     <div className="flex flex-col h-full min-h-[844px] bg-muted/20">
       {/* Image carousel */}
@@ -124,7 +150,12 @@ export default function MobileTripDetail({
           className="absolute top-0 left-0 right-0"
           action={
             <div className="flex gap-2">
-              <button className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 backdrop-blur-md">
+              <button
+                type="button"
+                onClick={handleShare}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 backdrop-blur-md"
+                aria-label="Share trip"
+              >
                 <Share2 className="h-4 w-4" />
               </button>
               <button
@@ -449,6 +480,13 @@ export default function MobileTripDetail({
           Join this trip
         </Button>
       </div>
+
+      {shareToast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[80] flex items-center gap-2 rounded-full bg-foreground/95 backdrop-blur px-4 py-2 text-xs font-medium text-background shadow-lg animate-[fade-in-up_300ms_ease-out]">
+          <Check className="h-3.5 w-3.5" />
+          {shareToast}
+        </div>
+      )}
 
       <TermsModal
         open={termsOpen}
