@@ -162,6 +162,18 @@ export function TermsModal({
                 confirmation. A receipt and booking confirmation will be sent
                 to the email address provided.
               </p>
+              {bookingType === "trip" && (
+                <p className="mt-2">
+                  For trips, payment is processed through{" "}
+                  <strong className="text-foreground">
+                    Pack &amp; Pally&apos;s platform Stripe account
+                  </strong>{" "}
+                  (not charged directly to the host). The host receives their
+                  share when the platform transfers funds to their connected
+                  Stripe / bank account according to our payout schedule and host
+                  agreement, after applicable fees.
+                </p>
+              )}
             </section>
 
             <section>

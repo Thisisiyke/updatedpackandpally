@@ -7,18 +7,22 @@ import { Search, MessageCircle, Users } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { MobileHeader } from "@/components/mobile/mobile-header";
 import { PartnerBottomTabs } from "@/components/mobile/partner-bottom-tabs";
-import { useConversations } from "@/hooks/use-conversations";
+import { useTravelerMessagesApi } from "@/hooks/use-traveler-messages-api";
+import { usePackPallyAuth } from "@/components/providers/session-provider";
 import { formatRelativeTime } from "@/lib/format-time";
-import { CURRENT_PARTNER } from "@/data/conversations";
 import type { Conversation } from "@/types/messaging";
 import { cn } from "@/lib/utils";
 
 type Tab = "all" | "direct" | "groups";
 
-function GroupAvatarStack({ conversation }: { conversation: Conversation }) {
-  const others = conversation.participants.filter(
-    (p) => p.id !== CURRENT_PARTNER.id
-  );
+function GroupAvatarStack({
+  conversation,
+  meId,
+}: {
+  conversation: Conversation;
+  meId: string;
+}) {
+  const others = conversation.participants.filter((p) => p.id !== meId);
   const shown = others.slice(0, 3);
 
   if (conversation.groupImage) {
@@ -62,10 +66,14 @@ function GroupAvatarStack({ conversation }: { conversation: Conversation }) {
   );
 }
 
-function DirectAvatar({ conversation }: { conversation: Conversation }) {
-  const other = conversation.participants.find(
-    (p) => p.id !== CURRENT_PARTNER.id
-  );
+function DirectAvatar({
+  conversation,
+  meId,
+}: {
+  conversation: Conversation;
+  meId: string;
+}) {
+  const other = conversation.participants.find((p) => p.id !== meId);
   if (!other) {
     return <div className="h-12 w-12 rounded-full bg-muted shrink-0" />;
   }
@@ -86,7 +94,15 @@ function DirectAvatar({ conversation }: { conversation: Conversation }) {
 }
 
 export default function MobilePartnerMessagesPage() {
-  const { conversations, hydrated } = useConversations("partner");
+  const { user: packUser } = usePackPallyAuth();
+  const useLive =
+    Boolean(packUser?.id) && packUser?.role !== "guest";
+  const {
+    conversations,
+    hydrated,
+    error,
+    meId,
+  } = useTravelerMessagesApi(useLive);
   const [tab, setTab] = useState<Tab>("all");
   const [query, setQuery] = useState("");
 
@@ -100,12 +116,12 @@ export default function MobilePartnerMessagesPage() {
     let list = conversations;
     if (tab === "direct") list = list.filter((c) => !c.isGroup);
     if (tab === "groups") list = list.filter((c) => c.isGroup);
-    if (query.trim()) {
+    if (query.trim() && meId) {
       const q = query.toLowerCase();
       list = list.filter((c) => {
         const title = c.isGroup
           ? c.groupName || ""
-          : c.participants.find((p) => p.id !== CURRENT_PARTNER.id)?.name || "";
+          : c.participants.find((p) => p.id !== meId)?.name || "";
         return (
           title.toLowerCase().includes(q) ||
           (c.tripTitle || "").toLowerCase().includes(q) ||
@@ -114,7 +130,7 @@ export default function MobilePartnerMessagesPage() {
       });
     }
     return list;
-  }, [conversations, tab, query]);
+  }, [conversations, tab, query, meId]);
 
   return (
     <div className="relative flex flex-col h-full min-h-[844px] bg-muted/20">
@@ -162,6 +178,14 @@ export default function MobilePartnerMessagesPage() {
           <div className="py-20 text-center text-xs text-muted-foreground">
             Loading…
           </div>
+        ) : error ? (
+          <div className="px-4 py-20 text-center text-xs text-muted-foreground">
+            {error}
+          </div>
+        ) : !meId ? (
+          <div className="py-20 text-center text-xs text-muted-foreground px-4">
+            Sign in to see your messages.
+          </div>
         ) : filtered.length === 0 ? (
           <div className="py-20 text-center">
             <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-muted">
@@ -179,7 +203,7 @@ export default function MobilePartnerMessagesPage() {
             {filtered.map((c) => {
               const title = c.isGroup
                 ? c.groupName || c.tripTitle || "Group"
-                : c.participants.find((p) => p.id !== CURRENT_PARTNER.id)?.name ||
+                : c.participants.find((p) => p.id !== meId)?.name ||
                   "Conversation";
               const showUnread = c.unreadCount > 0;
 
@@ -190,9 +214,9 @@ export default function MobilePartnerMessagesPage() {
                   className="flex items-start gap-3 px-4 py-3"
                 >
                   {c.isGroup ? (
-                    <GroupAvatarStack conversation={c} />
+                    <GroupAvatarStack conversation={c} meId={meId} />
                   ) : (
-                    <DirectAvatar conversation={c} />
+                    <DirectAvatar conversation={c} meId={meId} />
                   )}
 
                   <div className="flex-1 min-w-0">

@@ -34,6 +34,7 @@ import { TermsModal } from "@/components/shared/terms-modal";
 import { CancellationPolicyModal } from "@/components/shared/cancellation-policy-modal";
 import { trips } from "@/data/trips";
 import { hosts } from "@/data/hosts";
+import type { Trip } from "@/types";
 import {
   getHostTerms,
   subscribeToHostTerms,
@@ -45,6 +46,7 @@ import {
   calculatePriceBreakdown,
   formatRatePercent,
 } from "@/lib/trip-pricing";
+import { useRequireMember } from "@/hooks/use-require-member";
 
 export default function TripDetailPage({
   params,
@@ -53,12 +55,37 @@ export default function TripDetailPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
-  const trip = trips.find((t) => t.id === id);
+  const { ensureMember, loginDialog } = useRequireMember();
+  const seedTrip = trips.find((t) => t.id === id);
+  const [trip, setTrip] = useState<Trip | null>(seedTrip ?? null);
+  const [tripLoading, setTripLoading] = useState(!seedTrip);
   const [travelers, setTravelers] = useState(1);
   const [selectedImage, setSelectedImage] = useState(0);
   const [termsOpen, setTermsOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [hostTerms, setHostTerms] = useState<HostTerms | null>(null);
+
+  useEffect(() => {
+    const seed = trips.find((t) => t.id === id);
+    if (seed) {
+      setTrip(seed);
+      setTripLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setTripLoading(true);
+    fetch(`/api/trips/${encodeURIComponent(id)}`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((d: { trip?: Trip }) => {
+        if (!cancelled && d.trip) setTrip(d.trip);
+      })
+      .finally(() => {
+        if (!cancelled) setTripLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   const hostIdForTerms = trip?.hostId;
 
@@ -69,12 +96,22 @@ export default function TripDetailPage({
     return subscribeToHostTerms(refresh);
   }, [hostIdForTerms]);
 
+  if (tripLoading) {
+    return (
+      <div className="py-24 text-center text-muted-foreground text-sm">
+        Loading trip…
+      </div>
+    );
+  }
+
   if (!trip) return notFound();
 
-  const handleBookClick = () => setTermsOpen(true);
+  const handleBookClick = () => ensureMember(() => setTermsOpen(true));
   const proceedToCheckout = () => {
     setTermsOpen(false);
-    router.push(`/checkout?type=trip&tripId=${id}&travelers=${travelers}`);
+    router.push(
+      `/checkout?type=trip&tripId=${encodeURIComponent(trip.id)}&travelers=${travelers}`
+    );
   };
 
   const host = hosts.find((h) => h.id === trip.hostId);
@@ -479,6 +516,8 @@ export default function TripDetailPage({
         policy={resolveCancellationPolicy(host?.id)}
         hostName={host?.name}
       />
+
+      {loginDialog}
     </section>
   );
 }

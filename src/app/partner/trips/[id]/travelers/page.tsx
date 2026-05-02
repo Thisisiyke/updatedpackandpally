@@ -22,12 +22,18 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { SendReminderSheet } from "@/components/partner/send-reminder-sheet";
-import { partnerTrips } from "@/data/partner-trips";
 import {
   getBookingsForTrip,
   getTripPaymentStats,
   type PartnerBooking,
 } from "@/lib/partner-bookings";
+import { dynamoTripIdFromRouteParam } from "@/lib/trip-url";
+import {
+  wanderlyApiBookingToPartnerBooking,
+  uiTripToPartnerTrip,
+} from "@/lib/wanderly-partner-map";
+import type { Trip } from "@/types";
+import type { PartnerTrip } from "@/data/partner-trips";
 import {
   getRemindersForTrip,
   subscribeToReminders,
@@ -76,7 +82,8 @@ export default function TripTravelersPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
-  const trip = partnerTrips.find((t) => t.id === id);
+  const [trip, setTrip] = useState<PartnerTrip | null>(null);
+  const [tripLoading, setTripLoading] = useState(true);
 
   const [bookings, setBookings] = useState<PartnerBooking[]>([]);
   const [reminders, setReminders] = useState<ReminderRecord[]>([]);
@@ -86,7 +93,44 @@ export default function TripTravelersPage({
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
-    setBookings(getBookingsForTrip(id));
+    let cancelled = false;
+    setTripLoading(true);
+    fetch(`/api/trips/${encodeURIComponent(id)}`)
+      .then((r) => r.json())
+      .then((d: { trip?: Trip }) => {
+        if (!cancelled && d.trip) setTrip(uiTripToPartnerTrip(d.trip));
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setTripLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const dynamoId = dynamoTripIdFromRouteParam(id);
+      try {
+        const r = await fetch(
+          `/api/partner/bookings?tripId=${encodeURIComponent(dynamoId)}`,
+          { credentials: "include" }
+        );
+        if (r.ok) {
+          const d = (await r.json()) as { bookings?: Record<string, unknown>[] };
+          const list = d.bookings || [];
+          if (!cancelled && list.length > 0) {
+            setBookings(list.map((b) => wanderlyApiBookingToPartnerBooking(b)));
+            return;
+          }
+        }
+      } catch {
+        /* use seed/local */
+      }
+      if (!cancelled) setBookings(getBookingsForTrip(id));
+    })();
     setReminders(getRemindersForTrip(id));
     const refresh = () => setReminders(getRemindersForTrip(id));
     return subscribeToReminders(refresh);
@@ -107,6 +151,14 @@ export default function TripTravelersPage({
     if (filter === "partial") return partialBookings;
     return bookings;
   }, [filter, bookings, fullBookings, partialBookings]);
+
+  if (tripLoading) {
+    return (
+      <div className="p-10 text-center text-muted-foreground text-sm">
+        Loading trip…
+      </div>
+    );
+  }
 
   if (!trip) {
     return (

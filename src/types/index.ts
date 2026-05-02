@@ -33,6 +33,21 @@ export interface Trip {
   included: string[];
   notIncluded: string[];
   status: "upcoming" | "filling" | "almost-full" | "sold-out";
+  /** Present when trip is loaded from wanderly-1 API. */
+  wanderly?: {
+    _id: string;
+    timestamp: string;
+    tripTax: number;
+    adminName?: string;
+    adminProfile?: string;
+    nights?: string;
+    mornings?: string;
+    paylater?: string | boolean;
+    /** From Wanderly `city` / Places when creating the listing */
+    city?: string;
+    latitude?: number;
+    longitude?: number;
+  };
 }
 
 export interface ItineraryDay {

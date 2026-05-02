@@ -5,18 +5,15 @@ import Link from "next/link";
 import { Star, MapPin, Heart } from "lucide-react";
 import type { Hotel } from "@/types/booking";
 import { Badge } from "@/components/ui/badge";
-import { formatHotelPrice } from "@/lib/hotel-generator";
+import { formatHotelPrice, getMarketingHotelStayDates } from "@/lib/hotel-generator";
 
 export function FeaturedHotelCard({ hotel }: { hotel: Hotel }) {
+  const { checkIn, checkOut } = getMarketingHotelStayDates();
   return (
     <Link
       href={`/hotels/${hotel.id}?location=${encodeURIComponent(
         `${hotel.city}, ${hotel.country}`
-      )}&checkIn=${new Date(Date.now() + 7 * 86400000)
-        .toISOString()
-        .split("T")[0]}&checkOut=${new Date(Date.now() + 10 * 86400000)
-        .toISOString()
-        .split("T")[0]}&guests=2&rooms=1`}
+      )}&checkIn=${checkIn}&checkOut=${checkOut}&guests=2&rooms=1`}
       className="group flex flex-col overflow-hidden rounded-2xl border bg-white transition-all hover:shadow-lg hover:-translate-y-0.5 duration-300"
     >
       {/* Image */}
@@ -77,7 +74,7 @@ export function FeaturedHotelCard({ hotel }: { hotel: Hotel }) {
 
         <div className="mt-auto pt-3 flex items-end justify-between border-t mt-3">
           <span className="text-[10px] text-muted-foreground">
-            {hotel.reviewCount.toLocaleString()} reviews
+            {hotel.reviewCount.toLocaleString("en-US")} reviews
           </span>
           <div className="text-right">
             <p className="text-lg font-bold leading-none">

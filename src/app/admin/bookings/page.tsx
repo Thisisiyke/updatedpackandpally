@@ -297,11 +297,7 @@ export default function AdminBookingsPage() {
 
                     {/* Actions */}
                     <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={
-                          <button className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-muted transition-colors shrink-0" />
-                        }
-                      >
+                      <DropdownMenuTrigger className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg hover:bg-muted transition-colors outline-none">
                         <MoreHorizontal className="h-4 w-4" />
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-44">

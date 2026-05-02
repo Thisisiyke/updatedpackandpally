@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { plusJakarta, inter } from "@/lib/fonts";
-import { RouteShell } from "@/components/layout/route-shell";
-import { AuthProvider } from "@/components/providers/session-provider";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { AppProviders } from "@/components/providers/app-providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,11 +20,7 @@ export default function RootLayout({
       className={`${plusJakarta.variable} ${inter.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col font-sans">
-        <AuthProvider>
-          <TooltipProvider>
-            <RouteShell>{children}</RouteShell>
-          </TooltipProvider>
-        </AuthProvider>
+        <AppProviders>{children}</AppProviders>
       </body>
     </html>
   );

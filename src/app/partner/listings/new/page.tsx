@@ -3,7 +3,15 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, Check, Upload, Building2, MapPin, DollarSign } from "lucide-react";
+import {
+  ChevronLeft,
+  Check,
+  Upload,
+  Building2,
+  MapPin,
+  DollarSign,
+  Loader2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +24,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { createPartnerListing } from "@/lib/partner-listings-client";
+import { usePackPallyAuth } from "@/components/providers/session-provider";
+import { hostNeedsStripeConnect } from "@/lib/host-needs-stripe-connect";
+import { StripeRequiredForCreate } from "@/components/partner/stripe-required-for-create";
 
 const steps = [
   { num: 1, title: "Property type", icon: Building2 },
@@ -26,7 +38,10 @@ const steps = [
 
 export default function NewListingPage() {
   const router = useRouter();
+  const { user } = usePackPallyAuth();
   const [step, setStep] = useState(1);
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const [type, setType] = useState("hotel");
   const [name, setName] = useState("");
@@ -38,15 +53,43 @@ export default function NewListingPage() {
   const [rooms, setRooms] = useState(10);
 
   const canNext = () => {
-    if (step === 1) return name.length > 0;
-    if (step === 2) return address && city && country;
+    if (step === 1) return name.trim().length >= 2;
+    if (step === 2) return !!(address && city && country);
     if (step === 3) return price > 0 && rooms > 0;
     return true;
   };
 
-  const handleCreate = () => {
-    router.push("/partner/listings");
+  const handleCreate = async () => {
+    setFormError(null);
+    setSubmitting(true);
+    try {
+      const totalRooms = Math.max(1, Math.floor(rooms));
+      const created = await createPartnerListing({
+        type,
+        name: name.trim(),
+        description: description.trim(),
+        address: address.trim(),
+        city: city.trim(),
+        country: country.trim(),
+        currency: "USD",
+        status: "draft",
+        pricePerNight: price,
+        starRating: 3,
+        totalRooms,
+        availableRooms: totalRooms,
+        amenities: [],
+        coverImage: "",
+      });
+      router.push(`/partner/listings/${created.id}`);
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : "Could not create listing");
+      setSubmitting(false);
+    }
   };
+
+  if (hostNeedsStripeConnect(user)) {
+    return <StripeRequiredForCreate kind="listing" />;
+  }
 
   return (
     <div className="p-6 lg:p-10">
@@ -69,6 +112,11 @@ export default function NewListingPage() {
         <p className="mt-1 text-muted-foreground">
           Tell us about your property in a few steps
         </p>
+        {formError && (
+          <p className="mt-3 text-sm text-red-600" role="alert">
+            {formError}
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[240px_1fr]">
@@ -353,7 +401,20 @@ export default function NewListingPage() {
                 Continue
               </Button>
             ) : (
-              <Button onClick={handleCreate}>Create listing</Button>
+              <Button
+                onClick={() => void handleCreate()}
+                disabled={submitting}
+                className="gap-2"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Creating…
+                  </>
+                ) : (
+                  "Create listing"
+                )}
+              </Button>
             )}
           </div>
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -14,6 +14,7 @@ import {
   MapPin,
   Save,
   Check,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,14 +30,34 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { partnerListings } from "@/data/partner-listings";
+import type { PartnerListing } from "@/data/partner-listings";
+import {
+  deletePartnerListing,
+  fetchPartnerListing,
+  patchPartnerListingStatus,
+  updatePartnerListing,
+} from "@/lib/partner-listings-client";
 import { cn } from "@/lib/utils";
 
 const allAmenities = [
-  "Free WiFi", "Pool", "Spa", "Restaurant", "Bar", "Gym",
-  "Parking", "Beach Access", "Airport Shuttle", "Pet Friendly",
-  "Kitchen", "Washer/Dryer", "Air Conditioning", "Heating",
-  "Garden", "Terrace", "Concierge", "Room Service",
+  "Free WiFi",
+  "Pool",
+  "Spa",
+  "Restaurant",
+  "Bar",
+  "Gym",
+  "Parking",
+  "Beach Access",
+  "Airport Shuttle",
+  "Pet Friendly",
+  "Kitchen",
+  "Washer/Dryer",
+  "Air Conditioning",
+  "Heating",
+  "Garden",
+  "Terrace",
+  "Concierge",
+  "Room Service",
 ];
 
 function LoadingBadge({ visible }: { visible: boolean }) {
@@ -56,37 +77,129 @@ export default function ListingEditPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
-  const initial = partnerListings.find((l) => l.id === id);
 
-  const [listing, setListing] = useState(initial || null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [listing, setListing] = useState<PartnerListing | null>(null);
+
   const [saved, setSaved] = useState(false);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const [name, setName] = useState(initial?.name || "");
-  const [description, setDescription] = useState(initial?.description || "");
-  const [price, setPrice] = useState(initial?.pricePerNight || 0);
-  const [totalRooms, setTotalRooms] = useState(initial?.totalRooms || 0);
-  const [address, setAddress] = useState(initial?.address || "");
-  const [city, setCity] = useState(initial?.city || "");
-  const [country, setCountry] = useState(initial?.country || "");
-  const [type, setType] = useState(initial?.type || "hotel");
-  const [starRating, setStarRating] = useState(initial?.starRating || 3);
-  const [amenities, setAmenities] = useState<string[]>(initial?.amenities || []);
-  const [status, setStatus] = useState(initial?.status || "draft");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [price, setPrice] = useState(0);
+  const [totalRooms, setTotalRooms] = useState(1);
+  const [availableRooms, setAvailableRooms] = useState(0);
+  const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
+  const [country, setCountry] = useState("");
+  const [type, setType] = useState<PartnerListing["type"]>("hotel");
+  const [starRating, setStarRating] = useState(3);
+  const [amenities, setAmenities] = useState<string[]>([]);
+  const [status, setStatus] = useState<PartnerListing["status"]>("draft");
 
-  if (!initial || !listing) {
-    return (
-      <div className="p-10 text-center">
-        <h1 className="text-2xl font-bold">Listing not found</h1>
-        <Button asChild className="mt-6">
-          <Link href="/partner/listings">Back to listings</Link>
-        </Button>
-      </div>
-    );
-  }
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const mapped = await fetchPartnerListing(id);
+        if (cancelled) return;
+        setListing(mapped);
+        setName(mapped.name);
+        setDescription(mapped.description);
+        setPrice(mapped.pricePerNight);
+        setTotalRooms(mapped.totalRooms);
+        setAvailableRooms(mapped.availableRooms);
+        setAddress(mapped.address);
+        setCity(mapped.city);
+        setCountry(mapped.country);
+        setType(mapped.type);
+        setStarRating(mapped.starRating);
+        setAmenities(mapped.amenities || []);
+        setStatus(mapped.status);
+      } catch (e) {
+        if (!cancelled) {
+          setLoadError(e instanceof Error ? e.message : "Listing not found");
+          setListing(null);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+  const handleSave = async () => {
+    if (!listing) return;
+    setSaving(true);
+    setSaveErr(null);
+    try {
+      let tr = Math.max(1, Math.floor(totalRooms));
+      let ar = Math.min(tr, Math.max(0, Math.floor(availableRooms)));
+      const updated = await updatePartnerListing(listing.id, {
+        name: name.trim(),
+        description: description.trim(),
+        address: address.trim(),
+        city: city.trim(),
+        country: country.trim(),
+        type,
+        starRating,
+        pricePerNight: price,
+        currency: listing.currency,
+        totalRooms: tr,
+        availableRooms: ar,
+        amenities,
+        coverImage: listing.coverImage,
+        images: listing.images,
+        status,
+        rating: listing.rating,
+        reviewCount: listing.reviewCount,
+        occupancyRate: listing.occupancyRate,
+        monthlyRevenue: listing.monthlyRevenue,
+      });
+      setListing(updated);
+      setTotalRooms(updated.totalRooms);
+      setAvailableRooms(updated.availableRooms);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleStatusChange = async (next: PartnerListing["status"]) => {
+    if (!listing) return;
+    setSaveErr(null);
+    try {
+      const updated = await patchPartnerListingStatus(listing.id, next);
+      setListing(updated);
+      setStatus(updated.status);
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "Could not update status");
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!listing) return;
+    if (
+      !window.confirm(
+        `Delete “${listing.name}”? This cannot be undone.`
+      )
+    )
+      return;
+    try {
+      await deletePartnerListing(listing.id);
+      router.push("/partner/listings");
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "Delete failed");
+    }
   };
 
   const toggleAmenity = (amenity: string) => {
@@ -95,19 +208,39 @@ export default function ListingEditPage({
     );
   };
 
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 text-muted-foreground gap-2">
+        <Loader2 className="h-8 w-8 animate-spin" />
+        Loading listing…
+      </div>
+    );
+  }
+
+  if (loadError || !listing) {
+    return (
+      <div className="p-10 text-center">
+        <h1 className="text-2xl font-bold">Listing not found</h1>
+        <p className="mt-2 text-muted-foreground text-sm">{loadError}</p>
+        <Button asChild className="mt-6">
+          <Link href="/partner/listings">Back to listings</Link>
+        </Button>
+      </div>
+    );
+  }
+
+  const createdLabel =
+    listing.createdAt.length >= 10
+      ? listing.createdAt.slice(0, 10)
+      : listing.createdAt;
+
   return (
     <div className="p-6 lg:p-10">
       <LoadingBadge visible={saved} />
 
-      {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
         <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            asChild
-            className="h-9 w-9"
-          >
+          <Button variant="ghost" size="icon" asChild className="h-9 w-9">
             <Link href="/partner/listings">
               <ChevronLeft className="h-4 w-4" />
             </Link>
@@ -122,31 +255,53 @@ export default function ListingEditPage({
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <Badge
-            className={cn(
-              status === "published" && "bg-emerald-100 text-emerald-800 border-emerald-200",
-              status === "draft" && "bg-gray-100 text-gray-700 border-gray-200",
-              status === "paused" && "bg-amber-100 text-amber-800 border-amber-200"
-            )}
-          >
-            {status.charAt(0).toUpperCase() + status.slice(1)}
-          </Badge>
-          <Button variant="outline" size="sm" className="gap-1.5">
-            <Eye className="h-4 w-4" />
-            Preview
-          </Button>
-          <Button size="sm" className="gap-1.5" onClick={handleSave}>
-            <Save className="h-4 w-4" />
-            Save changes
-          </Button>
+        <div className="flex flex-col gap-1 items-end shrink-0">
+          <div className="flex items-center gap-2">
+            <Badge
+              className={cn(
+                status === "published" &&
+                  "bg-emerald-100 text-emerald-800 border-emerald-200",
+                status === "draft" &&
+                  "bg-gray-100 text-gray-700 border-gray-200",
+                status === "paused" &&
+                  "bg-amber-100 text-amber-800 border-amber-200"
+              )}
+            >
+              {status.charAt(0).toUpperCase() + status.slice(1)}
+            </Badge>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              type="button"
+              disabled
+              title="Guest-facing preview coming soon"
+            >
+              <Eye className="h-4 w-4" />
+              Preview
+            </Button>
+            <Button
+              size="sm"
+              className="gap-1.5"
+              onClick={() => void handleSave()}
+              disabled={saving}
+            >
+              {saving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+              Save changes
+            </Button>
+          </div>
+          {saveErr && (
+            <p className="text-xs text-red-600 max-w-xs text-right">{saveErr}</p>
+          )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Left - Main content */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Photos */}
           <div className="rounded-2xl border bg-white p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -155,7 +310,7 @@ export default function ListingEditPage({
                   High-quality photos boost bookings by up to 40%
                 </p>
               </div>
-              <Button variant="outline" size="sm" className="gap-1.5">
+              <Button variant="outline" size="sm" className="gap-1.5" type="button" disabled>
                 <Upload className="h-4 w-4" />
                 Upload
               </Button>
@@ -164,21 +319,22 @@ export default function ListingEditPage({
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {listing.images.map((img, i) => (
                 <div
-                  key={i}
+                  key={`${img}-${i}`}
                   className="relative group aspect-square overflow-hidden rounded-xl"
                 >
                   <Image
                     src={img}
                     alt={`Photo ${i + 1}`}
                     fill
+                    unoptimized
                     className="object-cover"
                     sizes="(max-width: 640px) 50vw, 33vw"
                   />
                   <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                    <Button size="sm" variant="secondary" className="h-8">
+                    <Button size="sm" variant="secondary" className="h-8" type="button" disabled>
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
-                    <Button size="sm" variant="destructive" className="h-8">
+                    <Button size="sm" variant="destructive" className="h-8" type="button" disabled>
                       <X className="h-3.5 w-3.5" />
                     </Button>
                   </div>
@@ -189,14 +345,17 @@ export default function ListingEditPage({
                   )}
                 </div>
               ))}
-              <button className="aspect-square rounded-xl border-2 border-dashed border-border hover:border-primary transition-colors flex flex-col items-center justify-center gap-1 text-muted-foreground hover:text-primary">
+              <button
+                type="button"
+                disabled
+                className="aspect-square rounded-xl border-2 border-dashed border-border flex flex-col items-center justify-center gap-1 text-muted-foreground opacity-60 cursor-not-allowed"
+              >
                 <Upload className="h-5 w-5" />
                 <span className="text-xs font-medium">Add photo</span>
               </button>
             </div>
           </div>
 
-          {/* Basics */}
           <div className="rounded-2xl border bg-white p-6">
             <h2 className="text-lg font-bold mb-4">Basics</h2>
             <div className="space-y-4">
@@ -224,7 +383,9 @@ export default function ListingEditPage({
                   <Label>Property type</Label>
                   <Select
                     value={type}
-                    onValueChange={(v) => v && setType(v as any)}
+                    onValueChange={(v) =>
+                      v && setType(v as PartnerListing["type"])
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -261,7 +422,6 @@ export default function ListingEditPage({
             </div>
           </div>
 
-          {/* Location */}
           <div className="rounded-2xl border bg-white p-6">
             <h2 className="text-lg font-bold mb-4">Location</h2>
             <div className="space-y-4">
@@ -275,10 +435,7 @@ export default function ListingEditPage({
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>City</Label>
-                  <Input
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                  />
+                  <Input value={city} onChange={(e) => setCity(e.target.value)} />
                 </div>
                 <div className="space-y-2">
                   <Label>Country</Label>
@@ -291,7 +448,6 @@ export default function ListingEditPage({
             </div>
           </div>
 
-          {/* Pricing & Rooms */}
           <div className="rounded-2xl border bg-white p-6">
             <h2 className="text-lg font-bold mb-4">Pricing & Rooms</h2>
             <div className="grid grid-cols-2 gap-4">
@@ -317,10 +473,17 @@ export default function ListingEditPage({
                   onChange={(e) => setTotalRooms(Number(e.target.value))}
                 />
               </div>
+              <div className="space-y-2 col-span-2 sm:col-span-1">
+                <Label>Available rooms</Label>
+                <Input
+                  type="number"
+                  value={availableRooms}
+                  onChange={(e) => setAvailableRooms(Number(e.target.value))}
+                />
+              </div>
             </div>
           </div>
 
-          {/* Amenities */}
           <div className="rounded-2xl border bg-white p-6">
             <h2 className="text-lg font-bold mb-1">Amenities</h2>
             <p className="text-xs text-muted-foreground mb-4">
@@ -343,14 +506,14 @@ export default function ListingEditPage({
           </div>
         </div>
 
-        {/* Right - Sidebar */}
         <div className="space-y-6">
-          {/* Status */}
           <div className="rounded-2xl border bg-white p-6">
             <h3 className="font-bold mb-3">Listing status</h3>
             <Select
               value={status}
-              onValueChange={(v) => v && setStatus(v as any)}
+              onValueChange={(v) => {
+                if (v) void handleStatusChange(v as PartnerListing["status"]);
+              }}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -368,7 +531,6 @@ export default function ListingEditPage({
             </p>
           </div>
 
-          {/* Quick stats */}
           <div className="rounded-2xl border bg-white p-6">
             <h3 className="font-bold mb-4">Performance</h3>
             <div className="space-y-4">
@@ -411,24 +573,23 @@ export default function ListingEditPage({
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Created</p>
-                  <p className="text-sm font-bold">
-                    {new Date(listing.createdAt).toLocaleDateString("en-US", {
-                      month: "short",
-                      year: "numeric",
-                    })}
-                  </p>
+                  <p className="text-sm font-bold">{createdLabel}</p>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Danger zone */}
           <div className="rounded-2xl border border-red-100 bg-red-50/50 p-6">
             <h3 className="font-bold text-red-900 mb-1">Danger zone</h3>
             <p className="text-xs text-red-700/80 mb-4">
               Deleting a listing is permanent and cannot be undone.
             </p>
-            <Button variant="destructive" size="sm">
+            <Button
+              variant="destructive"
+              size="sm"
+              type="button"
+              onClick={() => void handleDelete()}
+            >
               Delete listing
             </Button>
           </div>

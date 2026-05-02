@@ -32,7 +32,7 @@ function HotelsContent() {
   const guests = Number(searchParams.get("guests") || "2");
   const rooms = Number(searchParams.get("rooms") || "1");
 
-  const hasSearched = location && checkIn && checkOut;
+  const hasSearched = Boolean(location && checkIn && checkOut);
 
   const allHotels = useMemo(() => {
     if (!hasSearched) return [];

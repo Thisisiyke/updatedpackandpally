@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -20,6 +20,7 @@ import {
   ChevronUp,
   Trash2,
   Wand2,
+  Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,6 +42,16 @@ import {
 } from "@/data/partner-trips";
 import { AiTripModal } from "@/components/partner/ai-trip-modal";
 import { cn } from "@/lib/utils";
+import { usePackPallyAuth } from "@/components/providers/session-provider";
+import {
+  validateWanderlyTripDescription,
+  validateWanderlyTripName,
+  WANDERLY_TRIP_NAME_HINT,
+} from "@/lib/wanderly-trip-validation";
+import { hostNeedsStripeConnect } from "@/lib/host-needs-stripe-connect";
+import { StripeRequiredForCreate } from "@/components/partner/stripe-required-for-create";
+import { DestinationPlaceField } from "@/components/partner/destination-place-field";
+import type { Trip } from "@/types";
 
 const steps = [
   { num: 1, title: "Basics", icon: Compass },
@@ -59,8 +70,17 @@ interface ItineraryDay {
   activities: string[];
 }
 
+/** Match Wanderly DD/MM/YYYY without shifting calendar day (avoid UTC parsing of YYYY-MM-DD). */
+function formatIsoToDDMMYYYY(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
+  if (!m) return "";
+  const [, y, mo, d] = m;
+  return `${d}/${mo}/${y}`;
+}
+
 export default function NewTripPage() {
   const router = useRouter();
+  const { user: packUser } = usePackPallyAuth();
   const [step, setStep] = useState(1);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiGenerated, setAiGenerated] = useState(false);
@@ -69,6 +89,10 @@ export default function NewTripPage() {
   const [title, setTitle] = useState("");
   const [destination, setDestination] = useState("");
   const [country, setCountry] = useState("");
+  /** Locality from Google Places (Wanderly `city` field). */
+  const [resolvedCity, setResolvedCity] = useState("");
+  const [placeLat, setPlaceLat] = useState<number | null>(null);
+  const [placeLng, setPlaceLng] = useState<number | null>(null);
   const [description, setDescription] = useState("");
   const [categories, setCategories] = useState<string[]>([]);
   const [difficulty, setDifficulty] = useState("Easy");
@@ -111,6 +135,152 @@ export default function NewTripPage() {
   const [priceGroupOf3, setPriceGroupOf3] = useState(1899);
   const [taxRatePct, setTaxRatePct] = useState("8.25"); // percent; stored as decimal on save
 
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [galleryFiles, setGalleryFiles] = useState<File[]>([]);
+  const [agreementFile, setAgreementFile] = useState<File | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+
+  const [duplicateFromId, setDuplicateFromId] = useState<string | null>(null);
+  const [duplicateLoading, setDuplicateLoading] = useState(false);
+  const [duplicateReady, setDuplicateReady] = useState(false);
+  const [duplicateError, setDuplicateError] = useState("");
+
+  useEffect(() => {
+    setDuplicateFromId(
+      new URLSearchParams(window.location.search).get("duplicate")
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!duplicateFromId) return;
+    let cancelled = false;
+    setDuplicateLoading(true);
+    setDuplicateError("");
+    fetch(`/api/trips/${encodeURIComponent(duplicateFromId)}`, {
+      credentials: "include",
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("load"))))
+      .then((d: { trip?: Trip }) => {
+        if (cancelled || !d.trip) {
+          if (!cancelled) setDuplicateError("Could not load trip to copy.");
+          return;
+        }
+        const trip = d.trip;
+        setTitle(`${trip.title} (Copy)`);
+        setDestination(trip.destination);
+        setCountry(trip.country);
+        setDescription(trip.description);
+        setCategories(
+          trip.category.length > 0 ? [...trip.category] : ["Adventure"]
+        );
+        setDifficulty(trip.difficulty);
+
+        const start = trip.startDate.slice(0, 10);
+        const end = trip.endDate.slice(0, 10);
+        setStartDate(start);
+        setEndDate(end >= start ? end : start);
+
+        setMaxGroupSize(Math.max(1, trip.maxGroupSize));
+
+        const tripDur = Math.max(
+          1,
+          Math.round(
+            (new Date(trip.endDate).getTime() -
+              new Date(trip.startDate).getTime()) /
+              (1000 * 60 * 60 * 24)
+          )
+        );
+        const srcDays = trip.itinerary || [];
+        const dayRows: ItineraryDay[] = [];
+        for (let i = 0; i < tripDur; i++) {
+          const src = srcDays[i];
+          dayRows.push({
+            id: `d${i + 1}-${Date.now()}-${i}`,
+            title: src?.title?.trim() || `Day ${i + 1}`,
+            description:
+              src?.description?.trim() || "See day plan and inclusions.",
+            activities:
+              src?.activities && src.activities.length > 0
+                ? [...src.activities]
+                : [""],
+          });
+        }
+        setItinerary(
+          dayRows.length > 0
+            ? dayRows
+            : [
+                {
+                  id: "d1",
+                  title: "Day 1",
+                  description: "",
+                  activities: [""],
+                },
+              ]
+        );
+
+        if (trip.highlights.length) {
+          setHighlights(trip.highlights.map((h) => h));
+        } else {
+          setHighlights([""]);
+        }
+
+        if (trip.included.length) {
+          setIncluded([...trip.included]);
+        } else {
+          setIncluded([...defaultIncluded]);
+        }
+        if (trip.notIncluded.length) {
+          setNotIncluded([...trip.notIncluded]);
+        } else {
+          setNotIncluded([...defaultNotIncluded]);
+        }
+
+        if (trip.priceTiers) {
+          setUseTieredPricing(true);
+          setPriceSolo(trip.priceTiers.solo);
+          setPriceCouple(trip.priceTiers.couple);
+          setPriceGroupOf3(trip.priceTiers.groupOf3);
+        } else {
+          setUseTieredPricing(false);
+          setPrice(Math.max(0, Math.round(trip.price)));
+        }
+
+        if (typeof trip.wanderly?.tripTax === "number") {
+          setTaxRatePct(String(trip.wanderly.tripTax));
+        } else if (typeof trip.taxRate === "number") {
+          setTaxRatePct(String(Math.round(trip.taxRate * 10000) / 100));
+        }
+
+        if (typeof trip.wanderly?.city === "string" && trip.wanderly.city) {
+          setResolvedCity(trip.wanderly.city);
+        }
+        if (typeof trip.wanderly?.latitude === "number") {
+          setPlaceLat(trip.wanderly.latitude);
+        } else {
+          setPlaceLat(null);
+        }
+        if (typeof trip.wanderly?.longitude === "number") {
+          setPlaceLng(trip.wanderly.longitude);
+        } else {
+          setPlaceLng(null);
+        }
+
+        setStep(1);
+        setAiGenerated(false);
+        setDuplicateReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) setDuplicateError("Could not load trip to copy.");
+      })
+      .finally(() => {
+        if (!cancelled) setDuplicateLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [duplicateFromId]);
+
   const duration = Math.max(
     1,
     Math.round(
@@ -119,11 +289,24 @@ export default function NewTripPage() {
     )
   );
 
+  /** YYYY-MM-DD end must be on or after start. */
+  const datesValid = Boolean(startDate && endDate && endDate >= startDate);
+  const itineraryMatchesTripLength =
+    datesValid && itinerary.length === duration;
+
   const canNext = () => {
     if (step === 1)
       return title && destination && country && description && categories.length > 0;
-    if (step === 2) return startDate && endDate && maxGroupSize > 0;
-    if (step === 3) return itinerary.every((d) => d.title && d.description);
+    if (step === 2) {
+      return datesValid && maxGroupSize > 0;
+    }
+    if (step === 3) {
+      return (
+        datesValid &&
+        itineraryMatchesTripLength &&
+        itinerary.every((d) => d.title && d.description)
+      );
+    }
     if (step === 4) return included.length > 0;
     if (step === 6) return price > 0;
     return true;
@@ -196,9 +379,137 @@ export default function NewTripPage() {
     );
   };
 
-  const handleCreate = (asDraft = false) => {
-    router.push("/partner/trips");
+  const handleCreate = async (asDraft = false) => {
+    if (asDraft) {
+      router.push("/partner/trips");
+      return;
+    }
+    if (!packUser?.id) {
+      setCreateError("Sign in as a host to publish trips to Wanderly.");
+      return;
+    }
+    if (!coverFile || !agreementFile) {
+      setCreateError(
+        "Add a cover image and agreement document (step 5) before publishing."
+      );
+      return;
+    }
+    if (!validateWanderlyTripName(title)) {
+      setCreateError(`Trip title: ${WANDERLY_TRIP_NAME_HINT}`);
+      return;
+    }
+    if (!validateWanderlyTripDescription(description)) {
+      setCreateError(
+        "Description must be between 1 and 1,000 characters (no empty description)."
+      );
+      return;
+    }
+    if (!datesValid) {
+      setCreateError("End date must be on or after the start date.");
+      return;
+    }
+    if (!itineraryMatchesTripLength) {
+      setCreateError(
+        `Itinerary must have exactly ${duration} day(s) to match your trip length (${formatIsoToDDMMYYYY(
+          startDate
+        )} – ${formatIsoToDDMMYYYY(endDate)}). You have ${
+          itinerary.length
+        } day(s) planned.`
+      );
+      return;
+    }
+    const dest = destination.trim();
+    const cityVal =
+      resolvedCity.trim() || dest || country.trim() || title.trim();
+    const form = new FormData();
+    form.append("tripName", title.trim());
+    form.append("destination", dest || cityVal);
+    form.append("description", description.trim());
+    form.append("tripType", categories[0] || "Adventure");
+    const includedClean = included.map((s) => s.trim()).filter(Boolean);
+    const notIncludedClean = notIncluded.map((s) => s.trim()).filter(Boolean);
+    if (includedClean.length === 0 || notIncludedClean.length === 0) {
+      setCreateError(
+        "Add at least one item under What's included and What's not included."
+      );
+      return;
+    }
+    form.append("whatsIncluded", JSON.stringify(includedClean));
+    form.append("whatsNotIncluded", JSON.stringify(notIncludedClean));
+    form.append("duration", String(duration));
+    form.append("maxGuests", String(maxGroupSize));
+    form.append("price", String(useTieredPricing ? priceSolo : price));
+    form.append("nights", String(Math.max(0, duration - 1)));
+    form.append("mornings", String(duration));
+    form.append("startDate", formatIsoToDDMMYYYY(startDate));
+    form.append("endDate", formatIsoToDDMMYYYY(endDate));
+    form.append("adminUserId", packUser.id);
+    const itineraryPayload = itinerary.map((d, i) => ({
+      day: i + 1,
+      title: d.title,
+      description: d.description,
+      activities: d.activities.filter((a) => a.trim().length > 0),
+    }));
+    form.append("itinerary", JSON.stringify(itineraryPayload));
+    form.append(
+      "amenities",
+      JSON.stringify(
+        categories.length > 0 ? categories : ["Local guide", "Small group"]
+      )
+    );
+    form.append("visibility", "public");
+    form.append("adminProfile", packUser.image || "");
+    form.append("adminName", (packUser.name || "Host").trim());
+    form.append("country", country.trim());
+    form.append("city", cityVal);
+    form.append("tripTax", String(Number(taxRatePct) || 0));
+    form.append("latitude", placeLat != null ? String(placeLat) : "0");
+    form.append("longitude", placeLng != null ? String(placeLng) : "0");
+    form.append("otherTripName", "");
+    form.append("paylater", "false");
+
+    form.append("tripImages", coverFile);
+    galleryFiles.slice(0, 7).forEach((f) => form.append("tripImages", f));
+    const acc = galleryFiles.length > 0 ? galleryFiles.slice(0, 3) : [coverFile];
+    acc.forEach((f) => form.append("AccImages", f));
+    form.append("agreement", agreementFile);
+
+    setCreating(true);
+    setCreateError("");
+    try {
+      const res = await fetch("/api/partner/trips/create", {
+        method: "POST",
+        body: form,
+        credentials: "include",
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        status?: string;
+        message?: string;
+        error?: string;
+      };
+      if (!res.ok || data.status !== "success") {
+        const msg =
+          (typeof data.message === "string" && data.message) ||
+          (typeof data.error === "string" && data.error) ||
+          `Could not create trip (${res.status})`;
+        throw new Error(msg);
+      }
+      const newId = (data as { tripId?: string }).tripId;
+      router.push(
+        typeof newId === "string" && newId
+          ? `/partner/trips/${encodeURIComponent(newId)}`
+          : "/partner/trips"
+      );
+    } catch (e: unknown) {
+      setCreateError(e instanceof Error ? e.message : "Could not create trip");
+    } finally {
+      setCreating(false);
+    }
   };
+
+  if (hostNeedsStripeConnect(packUser)) {
+    return <StripeRequiredForCreate kind="trip" />;
+  }
 
   return (
     <div className="p-6 lg:p-10">
@@ -240,6 +551,27 @@ export default function NewTripPage() {
               <span className="font-semibold">AI draft ready.</span> Review each
               step and tweak anything before publishing — AI-generated content is
               a starting point.
+            </p>
+          </div>
+        )}
+
+        {duplicateFromId && duplicateLoading && (
+          <div className="mt-4 rounded-lg border bg-muted/50 p-3 text-sm text-muted-foreground">
+            Copying trip details…
+          </div>
+        )}
+        {duplicateError && (
+          <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            {duplicateError}
+          </div>
+        )}
+        {duplicateReady && !duplicateLoading && (
+          <div className="mt-4 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+            <Copy className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <p>
+              <span className="font-semibold">Draft from an existing trip.</span>{" "}
+              Re-upload cover, gallery, and agreement in step 5 before
+              publishing — file copies are not moved for you.
             </p>
           </div>
         )}
@@ -301,15 +633,22 @@ export default function NewTripPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Destination</Label>
-                  <Input
-                    value={destination}
-                    onChange={(e) => setDestination(e.target.value)}
-                    placeholder="e.g., Amalfi Coast"
-                  />
-                </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:items-start">
+                <DestinationPlaceField
+                  destination={destination}
+                  onDestinationChange={setDestination}
+                  onCountryChange={setCountry}
+                  onPlaceResolved={(p) => {
+                    setResolvedCity(p.city);
+                    setPlaceLat(p.latitude);
+                    setPlaceLng(p.longitude);
+                  }}
+                  onManualEdit={() => {
+                    setResolvedCity("");
+                    setPlaceLat(null);
+                    setPlaceLng(null);
+                  }}
+                />
                 <div className="space-y-2">
                   <Label>Country</Label>
                   <Input
@@ -317,6 +656,11 @@ export default function NewTripPage() {
                     onChange={(e) => setCountry(e.target.value)}
                     placeholder="e.g., Italy"
                   />
+                  {placeLat != null && placeLng != null ? (
+                    <p className="text-xs text-muted-foreground">
+                      Location pin: {placeLat.toFixed(5)}, {placeLng.toFixed(5)}
+                    </p>
+                  ) : null}
                 </div>
               </div>
 
@@ -418,8 +762,13 @@ export default function NewTripPage() {
               <div className="rounded-xl bg-primary/5 border border-primary/10 p-4">
                 <p className="text-sm">
                   <span className="font-semibold">Trip duration:</span>{" "}
-                  {duration} days
+                  {duration} day{duration !== 1 ? "s" : ""}
                 </p>
+                {startDate && endDate && endDate < startDate && (
+                  <p className="text-xs text-destructive mt-2">
+                    End date must be on or after the start date.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -490,7 +839,7 @@ export default function NewTripPage() {
 
               {/* Itinerary */}
               <div>
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center justify-between mb-1">
                   <Label>Day-by-day itinerary</Label>
                   <Button
                     type="button"
@@ -503,6 +852,21 @@ export default function NewTripPage() {
                     Add day
                   </Button>
                 </div>
+                {datesValid && (
+                  <p
+                    className={
+                      itineraryMatchesTripLength
+                        ? "text-xs text-muted-foreground mb-3"
+                        : "text-xs text-destructive mb-3"
+                    }
+                  >
+                    This trip is <strong>{duration}</strong> day
+                    {duration !== 1 ? "s" : ""} long — add exactly{" "}
+                    <strong>{duration}</strong> day
+                    {duration !== 1 ? "s" : ""} below (you have{" "}
+                    {itinerary.length}).
+                  </p>
+                )}
                 <div className="space-y-4">
                   {itinerary.map((day, idx) => (
                     <div key={day.id} className="rounded-xl border p-4 space-y-3">
@@ -842,32 +1206,77 @@ export default function NewTripPage() {
 
               <div>
                 <Label className="mb-2 block">Cover photo</Label>
-                <button className="w-full rounded-xl border-2 border-dashed border-border hover:border-primary transition-colors py-12 flex flex-col items-center justify-center gap-2 text-muted-foreground hover:text-primary">
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  id="pp-cover-file"
+                  onChange={(e) =>
+                    setCoverFile(e.target.files?.[0] ?? null)
+                  }
+                />
+                <label
+                  htmlFor="pp-cover-file"
+                  className="w-full rounded-xl border-2 border-dashed border-border hover:border-primary transition-colors py-12 flex flex-col items-center justify-center gap-2 text-muted-foreground hover:text-primary cursor-pointer"
+                >
                   <Upload className="h-6 w-6" />
                   <p className="text-sm font-medium">
-                    Click to upload cover photo
+                    {coverFile ? coverFile.name : "Click to upload cover photo"}
                   </p>
                   <p className="text-xs">JPG or PNG · Landscape 16:9 preferred</p>
-                </button>
+                </label>
               </div>
 
               <div>
-                <Label className="mb-2 block">Gallery photos (up to 8)</Label>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <button
-                      key={i}
-                      className="aspect-square rounded-xl border-2 border-dashed border-border hover:border-primary transition-colors flex flex-col items-center justify-center gap-1 text-muted-foreground hover:text-primary"
-                    >
-                      <Upload className="h-5 w-5" />
-                      <span className="text-xs font-medium">Add</span>
-                    </button>
-                  ))}
-                </div>
+                <Label className="mb-2 block">Gallery photos (optional)</Label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  id="pp-gallery-files"
+                  onChange={(e) =>
+                    setGalleryFiles(Array.from(e.target.files || []))
+                  }
+                />
+                <label
+                  htmlFor="pp-gallery-files"
+                  className="flex aspect-video max-w-md rounded-xl border-2 border-dashed border-border hover:border-primary transition-colors flex-col items-center justify-center gap-1 text-muted-foreground hover:text-primary cursor-pointer"
+                >
+                  <Upload className="h-5 w-5" />
+                  <span className="text-xs font-medium">
+                    {galleryFiles.length > 0
+                      ? `${galleryFiles.length} file(s) selected`
+                      : "Add more trip images"}
+                  </span>
+                </label>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Add photos from different parts of the trip — scenery,
-                  activities, food, accommodations.
+                  Extra images are appended to the trip gallery sent to Wanderly.
                 </p>
+              </div>
+
+              <div>
+                <Label className="mb-2 block">Host agreement (PDF or image)</Label>
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  className="hidden"
+                  id="pp-agreement-file"
+                  onChange={(e) =>
+                    setAgreementFile(e.target.files?.[0] ?? null)
+                  }
+                />
+                <label
+                  htmlFor="pp-agreement-file"
+                  className="flex rounded-xl border-2 border-dashed border-border hover:border-primary transition-colors py-8 flex-col items-center justify-center gap-2 text-muted-foreground hover:text-primary cursor-pointer"
+                >
+                  <Upload className="h-5 w-5" />
+                  <span className="text-sm">
+                    {agreementFile
+                      ? agreementFile.name
+                      : "Upload signed agreement"}
+                  </span>
+                </label>
               </div>
             </div>
           )}
@@ -1161,7 +1570,19 @@ export default function NewTripPage() {
                   <p className="text-xs text-muted-foreground mb-1">
                     Itinerary
                   </p>
-                  <p className="text-sm">{itinerary.length} days planned</p>
+                  <p
+                    className={
+                      itineraryMatchesTripLength
+                        ? "text-sm"
+                        : "text-sm text-destructive"
+                    }
+                  >
+                    {itinerary.length} of {duration} day
+                    {duration !== 1 ? "s" : ""} planned
+                    {!itineraryMatchesTripLength && datesValid
+                      ? " — must match trip length"
+                      : ""}
+                  </p>
                 </div>
               </div>
 
@@ -1176,28 +1597,42 @@ export default function NewTripPage() {
           )}
 
           {/* Navigation */}
-          <div className="mt-8 flex items-center justify-between pt-6 border-t">
-            <Button
-              variant="outline"
-              onClick={() => setStep(step - 1)}
-              disabled={step === 1}
-            >
-              Back
-            </Button>
-            {step < steps.length ? (
-              <Button onClick={() => setStep(step + 1)} disabled={!canNext()}>
-                Continue
+          <div className="mt-8 flex flex-col gap-3 pt-6 border-t">
+            {createError ? (
+              <p className="text-sm text-red-600">{createError}</p>
+            ) : null}
+            <div className="flex items-center justify-between">
+              <Button
+                variant="outline"
+                onClick={() => setStep(step - 1)}
+                disabled={step === 1 || creating}
+              >
+                Back
               </Button>
-            ) : (
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => handleCreate(true)}>
-                  Save as draft
+              {step < steps.length ? (
+                <Button onClick={() => setStep(step + 1)} disabled={!canNext()}>
+                  Continue
                 </Button>
-                <Button onClick={() => handleCreate(false)}>
-                  Publish trip
-                </Button>
-              </div>
-            )}
+              ) : (
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => handleCreate(true)}
+                    disabled={creating}
+                  >
+                    Save as draft
+                  </Button>
+                  <Button
+                    onClick={() => handleCreate(false)}
+                    disabled={
+                      creating || !coverFile || !agreementFile || !packUser?.id
+                    }
+                  >
+                    {creating ? "Publishing…" : "Publish trip"}
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -1214,6 +1649,9 @@ export default function NewTripPage() {
           setTitle(result.title);
           setDestination(inputs.destination);
           setCountry(inputs.country);
+          setResolvedCity("");
+          setPlaceLat(null);
+          setPlaceLng(null);
           setDescription(result.description);
           setCategories(inputs.categories);
           setDifficulty(inputs.difficulty);

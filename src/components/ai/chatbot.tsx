@@ -9,6 +9,26 @@ import { ChatMessage } from "@/types";
 import { getMockResponse } from "@/lib/ai/mock-chatbot";
 import { randomDelay } from "@/lib/ai/simulate-delay";
 import { cn } from "@/lib/utils";
+import { useRequireMember } from "@/hooks/use-require-member";
+
+function buildUserMessage(text: string): ChatMessage {
+  return {
+    id: `user-${Date.now()}`,
+    role: "user",
+    content: text,
+    timestamp: new Date(),
+  };
+}
+
+function buildAssistantMessage(content: string, quickReplies?: string[]): ChatMessage {
+  return {
+    id: `bot-${Date.now()}`,
+    role: "assistant",
+    content,
+    timestamp: new Date(),
+    quickReplies,
+  };
+}
 
 const GREETING: ChatMessage = {
   id: "greeting",
@@ -20,6 +40,7 @@ const GREETING: ChatMessage = {
 };
 
 export function Chatbot() {
+  const { ensureMember, loginDialog } = useRequireMember();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([GREETING]);
   const [isTyping, setIsTyping] = useState(false);
@@ -39,15 +60,11 @@ export function Chatbot() {
     }
   }, [isOpen]);
 
-  const sendMessage = async (content: string) => {
-    if (!content.trim()) return;
+  const deliverMessage = async (raw: string) => {
+    const text = raw.trim();
+    if (!text) return;
 
-    const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
-      role: "user",
-      content: content.trim(),
-      timestamp: new Date(),
-    };
+    const userMsg = buildUserMessage(text);
 
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
@@ -55,17 +72,16 @@ export function Chatbot() {
 
     await randomDelay(800, 1500);
 
-    const response = getMockResponse(content);
-    const botMsg: ChatMessage = {
-      id: `bot-${Date.now()}`,
-      role: "assistant",
-      content: response.content,
-      timestamp: new Date(),
-      quickReplies: response.quickReplies,
-    };
+    const response = getMockResponse(text);
+    const botMsg = buildAssistantMessage(response.content, response.quickReplies);
 
     setIsTyping(false);
     setMessages((prev) => [...prev, botMsg]);
+  };
+
+  const sendMessage = (content: string) => {
+    if (!content.trim()) return;
+    ensureMember(() => void deliverMessage(content));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -75,6 +91,7 @@ export function Chatbot() {
 
   return (
     <>
+      {loginDialog}
       {/* Floating Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}

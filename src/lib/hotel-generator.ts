@@ -80,10 +80,36 @@ const amenityPool = [
   "Non-smoking Rooms", "Terrace", "Garden", "Hot Tub", "Sauna", "Beach Access",
 ];
 
+/** Fisher–Yates with a seeded RNG — same seed ⇒ same order (safe for SSR + hydration). */
+function shuffleDeterministic<T>(items: T[], rand: () => number): T[] {
+  const a = [...items];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/**
+ * Fixed stay window for marketing / landing so server render matches the client
+ * (no `Date.now()` in render paths that generate hotel lists or links).
+ */
+export function getMarketingHotelStayDates(): { checkIn: string; checkOut: string } {
+  const start = new Date("2025-12-20T12:00:00.000Z");
+  const checkIn = new Date(start);
+  checkIn.setUTCDate(start.getUTCDate() + 7);
+  const checkOut = new Date(start);
+  checkOut.setUTCDate(start.getUTCDate() + 10);
+  return {
+    checkIn: checkIn.toISOString().slice(0, 10),
+    checkOut: checkOut.toISOString().slice(0, 10),
+  };
+}
+
 function getImagesForCity(city: string, rand: () => number, count: number): string[] {
   const cityImages = cityImageMap[city];
   const pool = cityImages && cityImages.length >= 2 ? cityImages : defaultHotelImages;
-  const shuffled = [...pool].sort(() => rand() - 0.5);
+  const shuffled = shuffleDeterministic([...pool], rand);
   const results: string[] = [];
   for (let i = 0; i < count; i++) {
     results.push(shuffled[i % shuffled.length]);
@@ -164,7 +190,7 @@ export function generateHotels(params: HotelSearchParams): Hotel[] {
 
     // Pick 8-12 amenities
     const amenityCount = 8 + Math.floor(rand() * 5);
-    const shuffledAmenities = [...amenityPool].sort(() => rand() - 0.5);
+    const shuffledAmenities = shuffleDeterministic([...amenityPool], rand);
     const amenities = shuffledAmenities.slice(0, amenityCount);
 
     hotels.push({
@@ -200,7 +226,12 @@ export function generateHotels(params: HotelSearchParams): Hotel[] {
     });
   }
 
-  return hotels.sort(() => rand() - 0.5);
+  return hotels.sort(
+    (a, b) =>
+      b.starRating - a.starRating ||
+      b.rating - a.rating ||
+      a.id.localeCompare(b.id)
+  );
 }
 
 export function formatHotelPrice(price: number, currency: string = "USD"): string {

@@ -15,6 +15,18 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "api.dicebear.com",
       },
+      {
+        protocol: "https",
+        hostname: "d2kun19yxkbvdw.cloudfront.net",
+      },
+      {
+        protocol: "https",
+        hostname: "vipme2023.s3.us-east-2.amazonaws.com",
+      },
+      {
+        protocol: "https",
+        hostname: "cdn.pixabay.com",
+      },
     ],
   },
 };

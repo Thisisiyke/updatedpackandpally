@@ -1,6 +1,7 @@
 "use client";
 
-import { Search, SlidersHorizontal, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ChevronLeft, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +27,7 @@ const sortOptions = [
 ];
 
 export default function BrowseTripsPage() {
+  const router = useRouter();
   const {
     search,
     setSearch,
@@ -41,6 +43,8 @@ export default function BrowseTripsPage() {
     clearFilters,
     hasActiveFilters,
     priceRanges,
+    tripsLoading,
+    loadError,
   } = useFilterTrips();
 
   return (
@@ -48,11 +52,25 @@ export default function BrowseTripsPage() {
       <Container>
         {/* Header */}
         <div className="mb-8">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="gap-1 -ml-2 mb-4 text-muted-foreground hover:text-foreground"
+            onClick={() => router.push("/dashboard")}
+          >
+            <ChevronLeft className="h-4 w-4" aria-hidden />
+            Back
+          </Button>
           <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
             Browse Adventures
           </h1>
           <p className="mt-2 text-muted-foreground">
-            {filtered.length} trip{filtered.length !== 1 ? "s" : ""} available
+            {tripsLoading
+              ? "Loading trips…"
+              : loadError
+                ? loadError
+                : `${filtered.length} trip${filtered.length !== 1 ? "s" : ""} available`}
           </p>
         </div>
 
@@ -142,7 +160,18 @@ export default function BrowseTripsPage() {
         </div>
 
         {/* Results */}
-        {filtered.length > 0 ? (
+        {tripsLoading ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-24 text-muted-foreground">
+            <Loader2 className="h-8 w-8 animate-spin" aria-hidden />
+            <p className="text-sm">Loading adventures…</p>
+          </div>
+        ) : loadError ? (
+          <EmptyState
+            icon={SlidersHorizontal}
+            title="Couldn’t load trips"
+            description={loadError}
+          />
+        ) : filtered.length > 0 ? (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((trip) => (
               <TripCard key={trip.id} trip={trip} />
@@ -151,10 +180,18 @@ export default function BrowseTripsPage() {
         ) : (
           <EmptyState
             icon={SlidersHorizontal}
-            title="No trips match your filters"
-            description="Try adjusting your search or filters to find more adventures."
-            actionLabel="Clear All Filters"
-            onAction={clearFilters}
+            title={
+              hasActiveFilters
+                ? "No trips match your filters"
+                : "No trips available yet"
+            }
+            description={
+              hasActiveFilters
+                ? "Try adjusting your search or filters to find more adventures."
+                : "Check back soon for new adventures, or try again later."
+            }
+            actionLabel={hasActiveFilters ? "Clear All Filters" : undefined}
+            onAction={hasActiveFilters ? clearFilters : undefined}
           />
         )}
       </Container>

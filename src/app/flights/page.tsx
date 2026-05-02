@@ -24,7 +24,7 @@ function FlightsContent() {
   const cabin = (searchParams.get("cabin") || "economy") as any;
   const tripType = searchParams.get("tripType") || "roundtrip";
 
-  const hasSearched = origin && destination && departDate;
+  const hasSearched = Boolean(origin && destination && departDate);
 
   const allFlights = useMemo(() => {
     if (!hasSearched) return [];

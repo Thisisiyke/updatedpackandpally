@@ -26,10 +26,12 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { generateHotels, formatHotelPrice, calculateNights } from "@/lib/hotel-generator";
 import { cn } from "@/lib/utils";
+import { useRequireMember } from "@/hooks/use-require-member";
 
 function HotelDetailContent({ id }: { id: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { ensureMember, loginDialog } = useRequireMember();
   const location = searchParams.get("location") || "";
   const checkIn = searchParams.get("checkIn") || "";
   const checkOut = searchParams.get("checkOut") || "";
@@ -66,11 +68,13 @@ function HotelDetailContent({ id }: { id: string }) {
   const total = selectedRoom.pricePerNight * nights;
 
   const handleContinue = () => {
-    const params = new URLSearchParams(searchParams);
-    params.set("type", "hotel");
-    params.set("hotelId", hotel.id);
-    params.set("roomId", selectedRoom.id);
-    router.push(`/checkout?${params.toString()}`);
+    ensureMember(() => {
+      const params = new URLSearchParams(searchParams);
+      params.set("type", "hotel");
+      params.set("hotelId", hotel.id);
+      params.set("roomId", selectedRoom.id);
+      router.push(`/checkout?${params.toString()}`);
+    });
   };
 
   const amenityIconMap: Record<string, any> = {
@@ -82,6 +86,7 @@ function HotelDetailContent({ id }: { id: string }) {
 
   return (
     <section className="pb-16">
+      {loginDialog}
       {/* Breadcrumb */}
       <div className="border-b bg-muted/30">
         <Container className="py-3">

@@ -1,7 +1,8 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
   ChevronLeft,
@@ -31,14 +32,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  partnerTrips,
   defaultIncluded,
   defaultNotIncluded,
   tripCategories,
+  type PartnerTrip,
 } from "@/data/partner-trips";
+import type { Trip } from "@/types";
+import { DestinationPlaceField } from "@/components/partner/destination-place-field";
+import { uiTripToPartnerTrip } from "@/lib/wanderly-partner-map";
 import { AiSurveyCard } from "@/components/partner/ai-survey-card";
 import { CURRENT_PARTNER } from "@/data/conversations";
 import { cn } from "@/lib/utils";
+import { deletePartnerTrip } from "@/lib/partner-delete-trip";
 
 function SavedToast({ visible }: { visible: boolean }) {
   if (!visible) return null;
@@ -56,7 +61,43 @@ export default function TripEditPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const initial = partnerTrips.find((t) => t.id === id);
+  const router = useRouter();
+  const [initial, setInitial] = useState<PartnerTrip | null>(null);
+  const [tripLoading, setTripLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setTripLoading(true);
+    fetch(`/api/trips/${encodeURIComponent(id)}`)
+      .then((r) => r.json())
+      .then((d: { trip?: Trip }) => {
+        if (cancelled || !d.trip) return;
+        setInitial(uiTripToPartnerTrip(d.trip));
+        const w = d.trip.wanderly;
+        if (
+          w &&
+          typeof w.latitude === "number" &&
+          typeof w.longitude === "number"
+        ) {
+          setPlaceLat(w.latitude);
+          setPlaceLng(w.longitude);
+        } else {
+          setPlaceLat(null);
+          setPlaceLng(null);
+        }
+        setResolvedCity(typeof w?.city === "string" ? w.city : "");
+      })
+      .catch(() => {
+        if (!cancelled) setInitial(null);
+      })
+      .finally(() => {
+        if (!cancelled) setTripLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   const [saved, setSaved] = useState(false);
   const [title, setTitle] = useState(initial?.title || "");
@@ -82,6 +123,38 @@ export default function TripEditPage({
   );
   const [customIncluded, setCustomIncluded] = useState("");
   const [customNotIncluded, setCustomNotIncluded] = useState("");
+  const [placeLat, setPlaceLat] = useState<number | null>(null);
+  const [placeLng, setPlaceLng] = useState<number | null>(null);
+  const [resolvedCity, setResolvedCity] = useState("");
+
+  useEffect(() => {
+    if (!initial) return;
+    setTitle(initial.title);
+    setDestination(initial.destination);
+    setCountry(initial.country);
+    setDescription(initial.description);
+    setDifficulty(initial.difficulty);
+    setPrice(initial.price);
+    setTaxRatePct(
+      typeof initial.taxRate === "number"
+        ? (initial.taxRate * 100).toString()
+        : "8.25"
+    );
+    setMaxGroupSize(initial.maxGroupSize);
+    setStatus(initial.status);
+    setCategories([...initial.category]);
+    setIncluded([...initial.included]);
+    setNotIncluded([...initial.notIncluded]);
+    setHighlights([...initial.highlights]);
+  }, [initial]);
+
+  if (tripLoading) {
+    return (
+      <div className="p-10 text-center text-muted-foreground text-sm">
+        Loading trip…
+      </div>
+    );
+  }
 
   if (!initial) {
     return (
@@ -97,6 +170,25 @@ export default function TripEditPage({
   const handleSave = () => {
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
+  };
+
+  const handleDeleteTrip = async () => {
+    if (!initial) return;
+    if (
+      !window.confirm(
+        `Delete “${initial.title}”? This cannot be undone. Stored images for this trip will be removed.`
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    const r = await deletePartnerTrip(id);
+    setDeleting(false);
+    if (!r.ok) {
+      window.alert(r.error);
+      return;
+    }
+    router.push("/partner/trips");
   };
 
   const toggleCategory = (c: string) => {
@@ -190,20 +282,40 @@ export default function TripEditPage({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Destination</Label>
-                  <Input
-                    value={destination}
-                    onChange={(e) => setDestination(e.target.value)}
-                  />
-                </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:items-start">
+                <DestinationPlaceField
+                  destination={destination}
+                  onDestinationChange={setDestination}
+                  onCountryChange={setCountry}
+                  onPlaceResolved={(p) => {
+                    setResolvedCity(p.city);
+                    setPlaceLat(p.latitude);
+                    setPlaceLng(p.longitude);
+                  }}
+                  onManualEdit={() => {
+                    setResolvedCity("");
+                    setPlaceLat(null);
+                    setPlaceLng(null);
+                  }}
+                />
                 <div className="space-y-2">
                   <Label>Country</Label>
                   <Input
                     value={country}
                     onChange={(e) => setCountry(e.target.value)}
                   />
+                  {placeLat != null && placeLng != null ? (
+                    <p className="text-xs text-muted-foreground">
+                      Saved coordinates: {placeLat.toFixed(5)},{" "}
+                      {placeLng.toFixed(5)}
+                      {resolvedCity ? ` · ${resolvedCity}` : ""}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Search and select a place to store map coordinates for this
+                      listing.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -561,9 +673,16 @@ export default function TripEditPage({
             <p className="text-xs text-red-700/80 mb-4">
               Deleting a trip is permanent. Existing bookings will be cancelled.
             </p>
-            <Button variant="destructive" size="sm" className="gap-1.5">
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              className="gap-1.5"
+              disabled={deleting}
+              onClick={() => void handleDeleteTrip()}
+            >
               <Trash2 className="h-4 w-4" />
-              Delete trip
+              {deleting ? "Deleting…" : "Delete trip"}
             </Button>
           </div>
         </div>

@@ -29,6 +29,7 @@ import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GeneratedTrip } from "@/types";
 import { generateMockTrip } from "@/lib/ai/mock-trip-generator";
+import { useRequireMember } from "@/hooks/use-require-member";
 
 const styles = ["Adventure", "Cultural", "Relaxation", "Culinary", "Wellness", "Photography"];
 const budgets = [
@@ -38,6 +39,7 @@ const budgets = [
 ];
 
 export function TripGenerator() {
+  const { ensureMember, loginDialog, authLoading } = useRequireMember();
   const [destination, setDestination] = useState("");
   const [days, setDays] = useState("7");
   const [style, setStyle] = useState("");
@@ -48,7 +50,7 @@ export function TripGenerator() {
 
   const canGenerate = destination && days && style && budget;
 
-  const handleGenerate = async () => {
+  const runGenerate = async () => {
     if (!canGenerate) return;
     setStatus("generating");
 
@@ -77,6 +79,10 @@ export function TripGenerator() {
     setStatus("complete");
   };
 
+  const handleGenerate = () => {
+    ensureMember(() => void runGenerate());
+  };
+
   const reset = () => {
     setStatus("idle");
     setResult(null);
@@ -89,24 +95,28 @@ export function TripGenerator() {
   // Generating State
   if (status === "generating") {
     return (
-      <Card className="mx-auto max-w-2xl">
-        <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-          <div className="relative">
-            <Sparkles className="h-12 w-12 text-primary animate-pulse" />
-          </div>
-          <h3 className="mt-6 text-xl font-bold">
-            Crafting Your Perfect Trip
-          </h3>
-          <p className="mt-2 text-muted-foreground">{loadingMsg}</p>
-          <Progress value={65} className="mt-6 w-64 h-2" />
-        </CardContent>
-      </Card>
+      <>
+        <Card className="mx-auto max-w-2xl">
+          <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="relative">
+              <Sparkles className="h-12 w-12 text-primary animate-pulse" />
+            </div>
+            <h3 className="mt-6 text-xl font-bold">
+              Crafting Your Perfect Trip
+            </h3>
+            <p className="mt-2 text-muted-foreground">{loadingMsg}</p>
+            <Progress value={65} className="mt-6 w-64 h-2" />
+          </CardContent>
+        </Card>
+        {loginDialog}
+      </>
     );
   }
 
   // Result State
   if (status === "complete" && result) {
     return (
+      <>
       <div className="mx-auto max-w-4xl space-y-8">
         {/* Hero */}
         <div
@@ -217,11 +227,14 @@ export function TripGenerator() {
           <Button>Save This Itinerary</Button>
         </div>
       </div>
+      {loginDialog}
+      </>
     );
   }
 
   // Form State
   return (
+    <>
     <Card className="mx-auto max-w-2xl">
       <CardContent className="pt-6 space-y-6">
         <div className="text-center mb-2">
@@ -303,7 +316,7 @@ export function TripGenerator() {
 
         <Button
           className="w-full h-11 gap-2"
-          disabled={!canGenerate}
+          disabled={!canGenerate || authLoading}
           onClick={handleGenerate}
         >
           <Sparkles className="h-4 w-4" />
@@ -311,5 +324,7 @@ export function TripGenerator() {
         </Button>
       </CardContent>
     </Card>
+    {loginDialog}
+    </>
   );
 }

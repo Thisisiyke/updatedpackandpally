@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { useSession } from "next-auth/react";
+import { useState, useEffect } from "react";
 import { redirect } from "next/navigation";
+import { usePackPallyAuth } from "@/components/providers/session-provider";
+import { isPackPallyHostUser } from "@/lib/host-access";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -31,9 +32,14 @@ import { Separator } from "@/components/ui/separator";
 import { Container } from "@/components/shared/container";
 import { ScrollReveal } from "@/components/shared/scroll-reveal";
 import { InlineMessages } from "@/components/shared/inline-messages";
-import { trips } from "@/data/trips";
-import { bookings } from "@/data/bookings";
+import { useTravelerMessagesApi } from "@/hooks/use-traveler-messages-api";
+import type { TravelerDashboardBooking } from "@/lib/wanderly-traveler-bookings";
 import { cn } from "@/lib/utils";
+import { DashboardDiscoverTrips } from "@/components/dashboard/dashboard-discover-trips";
+import { TravelerProfilePanel } from "@/components/dashboard/traveler-profile-panel";
+import { wanderlyHostTripToPartnerTrip } from "@/lib/wanderly-partner-map";
+import type { WanderlyTripRecord } from "@/lib/wanderly-trip-adapter";
+import type { PartnerTrip } from "@/data/partner-trips";
 
 const sidebarLinks = [
   { label: "Overview", icon: TrendingUp, id: "overview" },
@@ -52,18 +58,113 @@ function getStatusColor(status: string) {
       return "bg-amber-100 text-amber-800 border-amber-200";
     case "cancelled":
       return "bg-red-100 text-red-800 border-red-200";
+    case "completed":
+      return "bg-slate-100 text-slate-800 border-slate-200";
     default:
       return "bg-gray-100 text-gray-800";
   }
 }
 
-export default function DashboardPage() {
-  const { data: session, status } = useSession();
-  const [activeTab, setActiveTab] = useState("overview");
-  const upcomingTrips = bookings.filter((b) => b.status !== "cancelled");
-  const totalSpent = bookings.reduce((s, b) => s + b.totalPrice, 0);
+function formatBookingStatusLabel(status: TravelerDashboardBooking["status"]) {
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
 
-  if (status === "loading") {
+function hostTripBadgeConfig(status: PartnerTrip["status"]) {
+  switch (status) {
+    case "draft":
+      return { label: "Draft", className: "bg-gray-100 text-gray-800 border-gray-200" };
+    case "sold-out":
+      return { label: "Sold out", className: "bg-amber-100 text-amber-800 border-amber-200" };
+    case "published":
+    default:
+      return { label: "Live", className: "bg-emerald-100 text-emerald-800 border-emerald-200" };
+  }
+}
+
+export default function DashboardPage() {
+  const { user: packUser, loading: authLoading, refresh: refreshAuth } =
+    usePackPallyAuth();
+  const [activeTab, setActiveTab] = useState("overview");
+  const [myBookings, setMyBookings] = useState<TravelerDashboardBooking[]>([]);
+  const [bookingsLoading, setBookingsLoading] = useState(true);
+  const [hostTrips, setHostTrips] = useState<PartnerTrip[] | null>(null);
+  const [hostTripsLoading, setHostTripsLoading] = useState(false);
+  const [hostTripsError, setHostTripsError] = useState(false);
+
+  const travelerInboxEnabled =
+    Boolean(packUser?.id) && packUser?.role !== "guest";
+  const travelerInbox = useTravelerMessagesApi(travelerInboxEnabled);
+  const messageUnread = travelerInbox.totalUnread;
+  const messageConversationsCount = travelerInbox.conversations.length;
+
+  useEffect(() => {
+    if (!packUser || packUser.role === "guest") {
+      setMyBookings([]);
+      setBookingsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setBookingsLoading(true);
+    fetch("/api/me/bookings", { credentials: "include" })
+      .then(async (r) => {
+        if (!r.ok) return [];
+        const d = (await r.json()) as { bookings?: TravelerDashboardBooking[] };
+        return Array.isArray(d.bookings) ? d.bookings : [];
+      })
+      .then((list) => {
+        if (!cancelled) setMyBookings(list);
+      })
+      .catch(() => {
+        if (!cancelled) setMyBookings([]);
+      })
+      .finally(() => {
+        if (!cancelled) setBookingsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [packUser]);
+
+  useEffect(() => {
+    if (activeTab !== "manage" || !packUser?.id) return;
+    let cancelled = false;
+    setHostTripsLoading(true);
+    setHostTripsError(false);
+    fetch(
+      `/api/partner/trips?userId=${encodeURIComponent(packUser.id)}&limit=50`,
+      { credentials: "include" }
+    )
+      .then(async (r) => {
+        if (!r.ok) throw new Error("bad status");
+        return r.json() as Promise<{ items?: WanderlyTripRecord[] }>;
+      })
+      .then((d) => {
+        if (cancelled) return;
+        if (!Array.isArray(d.items)) {
+          setHostTrips([]);
+          return;
+        }
+        setHostTrips(d.items.map((row) => wanderlyHostTripToPartnerTrip(row)));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHostTripsError(true);
+          setHostTrips(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setHostTripsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, packUser?.id]);
+
+  const activeBookings = myBookings.filter((b) => b.status !== "cancelled");
+  const upcomingTrips = activeBookings.filter((b) => b.status !== "completed");
+  const totalSpent = activeBookings.reduce((s, b) => s + b.totalPrice, 0);
+
+  if (authLoading) {
     return (
       <section className="min-h-[calc(100vh-4rem)] bg-muted/30 flex items-center justify-center">
         <div className="text-muted-foreground">Loading...</div>
@@ -71,12 +172,12 @@ export default function DashboardPage() {
     );
   }
 
-  if (status === "unauthenticated") {
+  if (!packUser) {
     redirect("/login");
   }
 
-  const userName = session?.user?.name || "Traveler";
-  const userEmail = session?.user?.email || "";
+  const userName = packUser.name || "Traveler";
+  const userEmail = packUser.email || "";
   const userInitial = userName.charAt(0).toUpperCase();
 
   return (
@@ -87,13 +188,14 @@ export default function DashboardPage() {
           <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-4">
               <div className="relative h-14 w-14 overflow-hidden rounded-full border-2 border-primary/20 bg-primary/10">
-                {session?.user?.image ? (
+                {packUser.image ? (
                   <Image
-                    src={session.user.image}
+                    src={packUser.image}
                     alt="User"
                     fill
                     className="object-cover"
                     sizes="56px"
+                    unoptimized
                   />
                 ) : (
                   <span className="flex h-full w-full items-center justify-center text-xl font-bold text-primary">
@@ -110,7 +212,7 @@ export default function DashboardPage() {
                 </p>
               </div>
             </div>
-            {(session?.user as any)?.role === "host" ? (
+            {isPackPallyHostUser(packUser) ? (
               <Button className="gap-1.5 self-start" asChild>
                 <Link href="/partner">
                   <MapPin className="h-4 w-4" />
@@ -137,14 +239,26 @@ export default function DashboardPage() {
                   key={link.id}
                   onClick={() => setActiveTab(link.id)}
                   className={cn(
-                    "flex items-center gap-3 whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-medium transition-all",
+                    "flex items-center justify-between gap-2 whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-medium transition-all",
                     activeTab === link.id
                       ? "bg-white text-foreground shadow-sm"
                       : "text-muted-foreground hover:bg-white/60 hover:text-foreground"
                   )}
                 >
-                  <link.icon className="h-4 w-4 shrink-0" />
-                  {link.label}
+                  <span className="flex min-w-0 items-center gap-3">
+                    <link.icon className="h-4 w-4 shrink-0" />
+                    {link.label}
+                  </span>
+                  {link.id === "messages" &&
+                    travelerInbox.hydrated &&
+                    messageUnread > 0 && (
+                      <span
+                        className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold text-primary-foreground"
+                        aria-label={`${messageUnread} unread messages`}
+                      >
+                        {messageUnread > 99 ? "99+" : messageUnread}
+                      </span>
+                    )}
                 </button>
               ))}
             </nav>
@@ -156,7 +270,7 @@ export default function DashboardPage() {
             {activeTab === "overview" && (
               <div className="space-y-6">
                 {/* Stats Grid */}
-                <ScrollReveal>
+                {/* <ScrollReveal>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     {[
                       {
@@ -208,6 +322,10 @@ export default function DashboardPage() {
                       </div>
                     ))}
                   </div>
+                </ScrollReveal> */}
+
+                <ScrollReveal delay={80}>
+                  <DashboardDiscoverTrips enabled={activeTab === "overview"} />
                 </ScrollReveal>
 
                 {/* Upcoming Trips */}
@@ -226,65 +344,77 @@ export default function DashboardPage() {
                       </Button>
                     </div>
                     <div className="p-5 space-y-4">
-                      {bookings.slice(0, 2).map((booking) => {
-                        const trip = trips.find(
-                          (t) => t.id === booking.tripId
-                        );
-                        if (!trip) return null;
-                        const start = new Date(
-                          trip.startDate
-                        ).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                        });
-                        const end = new Date(
-                          trip.endDate
-                        ).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                        });
-
-                        return (
+                      {bookingsLoading ? (
+                        <p className="text-sm text-muted-foreground py-4">
+                          Loading bookings…
+                        </p>
+                      ) : upcomingTrips.length === 0 ? (
+                        <p className="text-sm text-muted-foreground py-4">
+                          No active bookings yet.{" "}
                           <Link
-                            href={`/trips/${trip.id}`}
-                            key={booking.id}
-                            className="flex items-center gap-4 rounded-lg border p-3 transition-all hover:shadow-sm hover:border-primary/20"
+                            href="/browse-trips"
+                            className="text-primary underline-offset-4 hover:underline"
                           >
-                            <div className="relative h-16 w-20 shrink-0 overflow-hidden rounded-lg">
-                              <Image
-                                src={trip.coverImage}
-                                alt={trip.title}
-                                fill
-                                className="object-cover"
-                                sizes="80px"
-                              />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <h3 className="font-semibold text-sm truncate">
-                                {trip.title}
-                              </h3>
-                              <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                                <span className="flex items-center gap-1">
-                                  <Calendar className="h-3 w-3" />
-                                  {start} — {end}
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <Users className="h-3 w-3" />
-                                  {booking.travelers}
-                                </span>
-                              </div>
-                            </div>
-                            <Badge
-                              className={`shrink-0 text-xs ${getStatusColor(
-                                booking.status
-                              )}`}
-                            >
-                              {booking.status.charAt(0).toUpperCase() +
-                                booking.status.slice(1)}
-                            </Badge>
+                            Browse trips
                           </Link>
-                        );
-                      })}
+                        </p>
+                      ) : (
+                        upcomingTrips.slice(0, 2).map((booking) => {
+                          const start = new Date(
+                            booking.startDate
+                          ).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                          });
+                          const end = new Date(
+                            booking.endDate
+                          ).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                          });
+
+                          return (
+                            <Link
+                              href={`/trips/${booking.tripRouteId}`}
+                              key={booking.id}
+                              className="flex items-center gap-4 rounded-lg border p-3 transition-all hover:shadow-sm hover:border-primary/20"
+                            >
+                              <div className="relative h-16 w-20 shrink-0 overflow-hidden rounded-lg">
+                                <Image
+                                  src={booking.coverImage}
+                                  alt={booking.tripTitle}
+                                  fill
+                                  className="object-cover"
+                                  sizes="80px"
+                                  unoptimized
+                                />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <h3 className="font-semibold text-sm truncate">
+                                  {booking.tripTitle}
+                                </h3>
+                                <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                                  <span className="flex items-center gap-1">
+                                    <Calendar className="h-3 w-3" />
+                                    {start} — {end}
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    <Users className="h-3 w-3" />
+                                    {booking.travelers}
+                                  </span>
+                                </div>
+                              </div>
+                              <Badge
+                                className={`shrink-0 text-xs ${getStatusColor(
+                                  booking.status
+                                )}`}
+                              >
+                                {formatBookingStatusLabel(booking.status)}
+                              </Badge>
+                            </Link>
+                          );
+                        })
+                      )}
                     </div>
                   </div>
                 </ScrollReveal>
@@ -320,7 +450,7 @@ export default function DashboardPage() {
                         </p>
                       </div>
                     </Link>
-                    {(session?.user as any)?.role === "host" ? (
+                    {isPackPallyHostUser(packUser) ? (
                       <Link
                         href="/partner"
                         className="flex items-center gap-4 rounded-xl border bg-white p-5 transition-all hover:shadow-md hover:border-primary/20"
@@ -367,80 +497,94 @@ export default function DashboardPage() {
                     </p>
                   </div>
                   <div className="p-5 space-y-4">
-                    {bookings.map((booking) => {
-                      const trip = trips.find(
-                        (t) => t.id === booking.tripId
-                      );
-                      if (!trip) return null;
-                      const startDate = new Date(
-                        trip.startDate
-                      ).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      });
-
-                      return (
-                        <div
-                          key={booking.id}
-                          className="flex flex-col gap-4 rounded-xl border p-4 transition-all hover:shadow-sm sm:flex-row sm:items-center"
+                    {bookingsLoading ? (
+                      <p className="text-sm text-muted-foreground">
+                        Loading bookings…
+                      </p>
+                    ) : myBookings.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        You don&apos;t have any reservations yet.{" "}
+                        <Link
+                          href="/browse-trips"
+                          className="text-primary underline-offset-4 hover:underline"
                         >
-                          <div className="relative h-24 w-full shrink-0 overflow-hidden rounded-lg sm:h-20 sm:w-32">
-                            <Image
-                              src={trip.coverImage}
-                              alt={trip.title}
-                              fill
-                              className="object-cover"
-                              sizes="(max-width: 640px) 100vw, 128px"
-                            />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <h3 className="font-bold truncate">
-                                  {trip.title}
-                                </h3>
-                                <p className="text-sm text-muted-foreground">
-                                  {trip.destination}, {trip.country}
-                                </p>
-                              </div>
-                              <Badge
-                                className={`shrink-0 ${getStatusColor(
-                                  booking.status
-                                )}`}
-                              >
-                                {booking.status.charAt(0).toUpperCase() +
-                                  booking.status.slice(1)}
-                              </Badge>
-                            </div>
-                            <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-                              <span className="flex items-center gap-1">
-                                <Calendar className="h-3.5 w-3.5" />
-                                {startDate}
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <Users className="h-3.5 w-3.5" />
-                                {booking.travelers} traveler
-                                {booking.travelers > 1 ? "s" : ""}
-                              </span>
-                              <span className="font-semibold text-foreground">
-                                ${booking.totalPrice.toLocaleString()}
-                              </span>
-                            </div>
-                          </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            asChild
-                            className="shrink-0"
+                          Find a trip
+                        </Link>
+                      </p>
+                    ) : (
+                      myBookings.map((booking) => {
+                        const startDate = new Date(
+                          booking.startDate
+                        ).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        });
+
+                        return (
+                          <div
+                            key={booking.id}
+                            className="flex flex-col gap-4 rounded-xl border p-4 transition-all hover:shadow-sm sm:flex-row sm:items-center"
                           >
-                            <Link href={`/trips/${trip.id}`}>
-                              View Trip
-                            </Link>
-                          </Button>
-                        </div>
-                      );
-                    })}
+                            <div className="relative h-24 w-full shrink-0 overflow-hidden rounded-lg sm:h-20 sm:w-32">
+                              <Image
+                                src={booking.coverImage}
+                                alt={booking.tripTitle}
+                                fill
+                                className="object-cover"
+                                sizes="(max-width: 640px) 100vw, 128px"
+                                unoptimized
+                              />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <h3 className="font-bold truncate">
+                                    {booking.tripTitle}
+                                  </h3>
+                                  <p className="text-sm text-muted-foreground">
+                                    {booking.destination}
+                                  </p>
+                                </div>
+                                <Badge
+                                  className={`shrink-0 ${getStatusColor(
+                                    booking.status
+                                  )}`}
+                                >
+                                  {formatBookingStatusLabel(booking.status)}
+                                </Badge>
+                              </div>
+                              <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+                                <span className="flex items-center gap-1">
+                                  <Calendar className="h-3.5 w-3.5" />
+                                  {startDate}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Users className="h-3.5 w-3.5" />
+                                  {booking.travelers} traveler
+                                  {booking.travelers > 1 ? "s" : ""}
+                                </span>
+                                <span className="font-semibold text-foreground">
+                                  ${booking.totalPrice.toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              asChild
+                              className="shrink-0"
+                            >
+                              <Link
+                                href={`/trips/${booking.tripRouteId}`}
+                              >
+                                View Trip
+                              </Link>
+                            </Button>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
               </ScrollReveal>
@@ -453,10 +597,29 @@ export default function DashboardPage() {
                   <div className="mb-4">
                     <h2 className="text-lg font-bold">Messages</h2>
                     <p className="text-sm text-muted-foreground">
-                      Chat with your hosts and partners
+                      {travelerInboxEnabled ? (
+                        travelerInbox.hydrated ? (
+                          messageConversationsCount === 0 ? (
+                            "No conversations yet. Book a trip to start chatting."
+                          ) : messageUnread > 0 ? (
+                            `${messageConversationsCount} conversation${messageConversationsCount === 1 ? "" : "s"} · ${messageUnread} unread`
+                          ) : (
+                            `${messageConversationsCount} conversation${messageConversationsCount === 1 ? "" : "s"}`
+                          )
+                        ) : (
+                          "Loading conversations…"
+                        )
+                      ) : (
+                        "Chat with your hosts and partners"
+                      )}
                     </p>
                   </div>
-                  <InlineMessages side="user" />
+                  <InlineMessages
+                    side="user"
+                    sharedTravelerInbox={
+                      travelerInboxEnabled ? travelerInbox : undefined
+                    }
+                  />
                 </div>
               </ScrollReveal>
             )}
@@ -480,83 +643,109 @@ export default function DashboardPage() {
                     </Button>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                    {trips.slice(0, 6).map((trip) => {
-                      const fill =
-                        (trip.currentBookings / trip.maxGroupSize) * 100;
-                      return (
-                        <div
-                          key={trip.id}
-                          className="overflow-hidden rounded-xl border bg-white transition-all hover:shadow-md"
-                        >
-                          <div className="relative h-36">
-                            <Image
-                              src={trip.coverImage}
-                              alt={trip.title}
-                              fill
-                              className="object-cover"
-                              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                            />
-                            <Badge
-                              className={cn(
-                                "absolute top-3 left-3 text-xs",
-                                trip.status === "almost-full"
-                                  ? "bg-amber-100 text-amber-800 border-amber-200"
-                                  : trip.status === "filling"
-                                  ? "bg-emerald-100 text-emerald-800 border-emerald-200"
-                                  : "bg-white/90 text-foreground"
-                              )}
-                            >
-                              {trip.status.replace("-", " ")}
-                            </Badge>
-                          </div>
-                          <div className="p-4">
-                            <h3 className="font-bold truncate text-sm">
-                              {trip.title}
-                            </h3>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              {trip.destination}, {trip.country}
-                            </p>
+                  {hostTripsLoading && (
+                    <p className="text-sm text-muted-foreground">Loading your trips…</p>
+                  )}
+                  {hostTripsError && (
+                    <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                      Could not load your trips. Try again in a moment.
+                    </div>
+                  )}
+                  {!hostTripsLoading && !hostTripsError && hostTrips && hostTrips.length === 0 && (
+                    <div className="rounded-xl border bg-white p-8 text-center">
+                      <p className="text-sm text-muted-foreground mb-4">
+                        You have no published trips yet. Create one to see it here.
+                      </p>
+                      <Button asChild className="gap-1.5">
+                        <Link href="/partner/trips/new">
+                          <Plus className="h-4 w-4" />
+                          Create trip
+                        </Link>
+                      </Button>
+                    </div>
+                  )}
+                  {!hostTripsLoading && !hostTripsError && hostTrips && hostTrips.length > 0 && (
+                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                      {hostTrips.map((trip) => {
+                        const fill =
+                          trip.maxGroupSize > 0
+                            ? (trip.currentBookings / trip.maxGroupSize) * 100
+                            : 0;
+                        const badge = hostTripBadgeConfig(trip.status);
+                        return (
+                          <div
+                            key={trip.id}
+                            className="overflow-hidden rounded-xl border bg-white transition-all hover:shadow-md"
+                          >
+                            <div className="relative h-36">
+                              <Image
+                                src={trip.coverImage}
+                                alt={trip.title}
+                                fill
+                                className="object-cover"
+                                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                              />
+                              <Badge
+                                className={cn(
+                                  "absolute top-3 left-3 text-xs border",
+                                  badge.className
+                                )}
+                              >
+                                {badge.label}
+                              </Badge>
+                            </div>
+                            <div className="p-4">
+                              <h3 className="font-bold truncate text-sm">
+                                {trip.title}
+                              </h3>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {trip.destination}
+                                {trip.country ? `, ${trip.country}` : ""}
+                              </p>
 
-                            <div className="mt-3 space-y-1.5">
-                              <div className="flex items-center justify-between text-xs">
-                                <span className="text-muted-foreground">
-                                  Bookings
-                                </span>
-                                <span className="font-medium">
-                                  {trip.currentBookings}/{trip.maxGroupSize}
-                                </span>
+                              <div className="mt-3 space-y-1.5">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-muted-foreground">
+                                    Bookings
+                                  </span>
+                                  <span className="font-medium">
+                                    {trip.currentBookings}/{trip.maxGroupSize}
+                                  </span>
+                                </div>
+                                <Progress value={fill} className="h-1.5" />
                               </div>
-                              <Progress value={fill} className="h-1.5" />
-                            </div>
 
-                            <Separator className="my-3" />
+                              <Separator className="my-3" />
 
-                            <div className="flex gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="flex-1 gap-1 text-xs h-8"
-                              >
-                                <Pencil className="h-3 w-3" />
-                                Edit
-                              </Button>
-                              <Button
-                                size="sm"
-                                className="flex-1 gap-1 text-xs h-8"
-                                asChild
-                              >
-                                <Link href={`/trips/${trip.id}`}>
-                                  <Eye className="h-3 w-3" />
-                                  View
-                                </Link>
-                              </Button>
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="flex-1 gap-1 text-xs h-8"
+                                  asChild
+                                >
+                                  <Link href={`/partner/trips/${trip.id}`}>
+                                    <Pencil className="h-3 w-3" />
+                                    Edit
+                                  </Link>
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  className="flex-1 gap-1 text-xs h-8"
+                                  asChild
+                                >
+                                  <Link href={`/trips/${trip.id}`}>
+                                    <Eye className="h-3 w-3" />
+                                    View
+                                  </Link>
+                                </Button>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </ScrollReveal>
             )}
@@ -564,64 +753,11 @@ export default function DashboardPage() {
             {/* Profile Tab */}
             {activeTab === "profile" && (
               <ScrollReveal>
-                <div className="rounded-xl border bg-white p-6">
-                  <div className="flex flex-col items-center text-center sm:flex-row sm:text-left sm:items-start gap-6">
-                    <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-full border-4 border-primary/10 bg-primary/10">
-                      {session?.user?.image ? (
-                        <Image
-                          src={session.user.image}
-                          alt={userName}
-                          fill
-                          className="object-cover"
-                          sizes="96px"
-                        />
-                      ) : (
-                        <span className="flex h-full w-full items-center justify-center text-3xl font-bold text-primary">
-                          {userInitial}
-                        </span>
-                      )}
-                    </div>
-                    <div>
-                      <h2 className="text-xl font-bold">{userName}</h2>
-                      <p className="text-muted-foreground">
-                        {userEmail}
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Badge variant="secondary">Traveler</Badge>
-                        <Badge variant="secondary">
-                          Member since 2025
-                        </Badge>
-                      </div>
-                      <p className="mt-4 text-sm text-muted-foreground max-w-md">
-                        Adventure seeker and culture enthusiast. Always looking
-                        for the next group trip to join. Passionate about meeting
-                        new people and exploring off-the-beaten-path
-                        destinations.
-                      </p>
-                      <Button variant="outline" size="sm" className="mt-4">
-                        Edit Profile
-                      </Button>
-                    </div>
-                  </div>
-
-                  <Separator className="my-6" />
-
-                  <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
-                    {[
-                      { label: "Trips Taken", value: "3" },
-                      { label: "Countries", value: "3" },
-                      { label: "Reviews", value: "5" },
-                      { label: "Photos", value: "42" },
-                    ].map((s) => (
-                      <div key={s.label} className="text-center">
-                        <p className="text-2xl font-bold">{s.value}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {s.label}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <TravelerProfilePanel
+                  packUser={packUser}
+                  refreshAuth={refreshAuth}
+                  myBookings={myBookings}
+                />
               </ScrollReveal>
             )}
 

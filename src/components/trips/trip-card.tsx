@@ -22,6 +22,8 @@ function getStatusBadge(status: Trip["status"]) {
 
 export function TripCard({ trip }: { trip: Trip }) {
   const host = hosts.find((h) => h.id === trip.hostId);
+  const wanderlyHostName = trip.wanderly?.adminName;
+  const wanderlyHostAvatar = trip.wanderly?.adminProfile;
   const badge = getStatusBadge(trip.status);
   const startDate = new Date(trip.startDate).toLocaleDateString("en-US", {
     month: "short",
@@ -94,19 +96,32 @@ export function TripCard({ trip }: { trip: Trip }) {
               ${trip.price.toLocaleString()}
             </p>
           </div>
-          {host && (
+          {(host || wanderlyHostName) && (
             <div className="flex items-center gap-2">
-              <div className="relative h-7 w-7 overflow-hidden rounded-full">
-                <Image
-                  src={host.avatar}
-                  alt={host.name}
-                  fill
-                  className="object-cover"
-                  sizes="28px"
-                />
+              <div className="relative h-7 w-7 overflow-hidden rounded-full bg-muted">
+                {host ? (
+                  <Image
+                    src={host.avatar}
+                    alt={host.name}
+                    fill
+                    className="object-cover"
+                    sizes="28px"
+                  />
+                ) : wanderlyHostAvatar ? (
+                  <Image
+                    src={wanderlyHostAvatar}
+                    alt={wanderlyHostName || ""}
+                    fill
+                    className="object-cover"
+                    sizes="28px"
+                    unoptimized
+                  />
+                ) : null}
               </div>
               <span className="text-xs text-muted-foreground">
-                {host.name.split(" ")[0]}
+                {host
+                  ? host.name.split(" ")[0]
+                  : (wanderlyHostName || "Host").split(" ")[0]}
               </span>
             </div>
           )}

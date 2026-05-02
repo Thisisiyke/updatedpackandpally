@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MobileHeader } from "@/components/mobile/mobile-header";
+import { PlatformPaymentNotice } from "@/components/shared/platform-payment-notice";
 import { isStripeConnected, safePartnerNext } from "@/lib/partner-stripe";
 
 function OnboardingIntro() {
@@ -57,9 +58,14 @@ function OnboardingIntro() {
           Set up payouts with Stripe
         </h1>
         <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
-          Pack &amp; Pally uses Stripe to securely verify your identity and pay
-          you. Stripe handles all of the paperwork — no forms from us.
+          Travelers pay Pack &amp; Pally first; we transfer your earnings to your
+          connected Stripe account on our schedule. Stripe verifies you and
+          handles compliance paperwork.
         </p>
+
+        <div className="mt-4">
+          <PlatformPaymentNotice variant="host-inline" />
+        </div>
 
         <div className="mt-6 space-y-3">
           <FeatureRow
@@ -69,8 +75,8 @@ function OnboardingIntro() {
           />
           <FeatureRow
             icon={<Banknote className="h-4 w-4 text-primary" />}
-            title="Fast, direct payouts"
-            body="Funds land in your bank within 48 hours of each trip ending."
+            title="Payouts from the platform"
+            body={`We move your share from Pack & Pally's platform Stripe account to your bank—often within ~48 hours after a trip ends.`}
           />
           <FeatureRow
             icon={<FileCheck2 className="h-4 w-4 text-primary" />}

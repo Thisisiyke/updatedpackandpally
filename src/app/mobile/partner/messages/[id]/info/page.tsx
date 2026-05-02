@@ -1,23 +1,21 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
   Bell,
   BellOff,
-  LogOut,
   Users,
   UserPlus,
   Crown,
   Compass,
-  AlertTriangle,
   ChevronLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MobileHeader } from "@/components/mobile/mobile-header";
-import { useConversations } from "@/hooks/use-conversations";
-import { CURRENT_PARTNER } from "@/data/conversations";
+import { useTravelerMessagesApi } from "@/hooks/use-traveler-messages-api";
+import { usePackPallyAuth } from "@/components/providers/session-provider";
 import { cn } from "@/lib/utils";
 
 export default function PartnerGroupInfoPage({
@@ -27,18 +25,33 @@ export default function PartnerGroupInfoPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
-  const { getConversation, leaveGroup, hydrated } =
-    useConversations("partner");
+  const { user: packUser } = usePackPallyAuth();
+  const useLive =
+    Boolean(packUser?.id) && packUser?.role !== "guest";
+  const { conversations, hydrated, meId } = useTravelerMessagesApi(useLive);
 
   const [muted, setMuted] = useState(false);
-  const [confirmLeave, setConfirmLeave] = useState(false);
 
-  const conversation = getConversation(id);
+  const conversation = useMemo(
+    () => conversations.find((c) => c.id === id),
+    [conversations, id]
+  );
 
   if (!hydrated) {
     return (
       <div className="flex h-full min-h-[844px] items-center justify-center text-sm text-muted-foreground">
         Loading…
+      </div>
+    );
+  }
+
+  if (!useLive || !meId) {
+    return (
+      <div className="flex h-full min-h-[844px] flex-col">
+        <MobileHeader title="Group info" />
+        <div className="flex-1 flex items-center justify-center p-6 text-center text-sm text-muted-foreground">
+          Sign in to view this group.
+        </div>
       </div>
     );
   }
@@ -64,11 +77,6 @@ export default function PartnerGroupInfoPage({
 
   const members = conversation.participants;
   const admin = members.find((m) => m.id === conversation.createdBy) || null;
-
-  const handleLeave = () => {
-    leaveGroup(id);
-    router.push("/mobile/partner/messages");
-  };
 
   return (
     <div className="flex flex-col h-full min-h-[844px] bg-muted/20">
@@ -194,7 +202,7 @@ export default function PartnerGroupInfoPage({
           <div className="divide-y">
             {members.map((m) => {
               const isAdmin = admin?.id === m.id;
-              const isMe = m.id === CURRENT_PARTNER.id;
+              const isMe = m.id === meId;
               return (
                 <div key={m.id} className="flex items-center gap-3 px-4 py-3">
                   <div className="relative shrink-0">
@@ -237,66 +245,10 @@ export default function PartnerGroupInfoPage({
           </div>
         </div>
 
-        {/* Danger zone */}
-        <div className="bg-white mt-3 mb-6 border-t">
-          <button
-            onClick={() => setConfirmLeave(true)}
-            className="w-full flex items-center gap-3 p-3.5 text-left"
-          >
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-50">
-              <LogOut className="h-4 w-4 text-red-600" />
-            </div>
-            <div className="flex-1">
-              <p className="text-sm font-semibold text-red-600">
-                Leave group
-              </p>
-              <p className="text-[10px] text-muted-foreground">
-                You&apos;ll stop receiving messages in this chat
-              </p>
-            </div>
-          </button>
+        <div className="bg-white mt-3 mb-6 border-t px-4 py-3 text-[11px] text-muted-foreground">
+          To leave a group or change membership, use the Pack & Pally mobile app.
         </div>
       </div>
-
-      {/* Confirm leave overlay */}
-      {confirmLeave && (
-        <>
-          <div
-            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
-            onClick={() => setConfirmLeave(false)}
-          />
-          <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 mx-auto max-w-sm rounded-2xl bg-white p-5 shadow-2xl">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-50 shrink-0">
-                <AlertTriangle className="h-5 w-5 text-red-600" />
-              </div>
-              <div className="flex-1">
-                <p className="font-bold text-sm">Leave this group?</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  The travelers will stay in the group but you&apos;ll stop
-                  seeing new messages from them here. You can still reach them
-                  through direct messages or the trip page.
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 flex items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setConfirmLeave(false)}
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleLeave}
-                className="flex-1 bg-red-600 hover:bg-red-700"
-              >
-                Leave group
-              </Button>
-            </div>
-          </div>
-        </>
-      )}
 
       {/* Back bar */}
       <div className="sticky bottom-0 bg-white border-t p-3 md:pb-6">

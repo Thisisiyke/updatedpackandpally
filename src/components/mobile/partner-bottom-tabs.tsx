@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Home, MessageCircle, Wallet, User } from "lucide-react";
-import { useConversations } from "@/hooks/use-conversations";
+import { usePackPallyAuth } from "@/components/providers/session-provider";
+import { useTravelerMessagesApi } from "@/hooks/use-traveler-messages-api";
 import { cn } from "@/lib/utils";
 
 const tabs = [
@@ -30,7 +31,11 @@ const tabs = [
 
 export function PartnerBottomTabs() {
   const pathname = usePathname();
-  const { totalUnread } = useConversations("partner");
+  const { user } = usePackPallyAuth();
+  const inboxEnabled = Boolean(user?.id) && user?.role !== "guest";
+  const { totalUnread, hydrated: inboxLoaded } = useTravelerMessagesApi(
+    inboxEnabled
+  );
 
   return (
     <nav className="sticky bottom-0 z-40 bg-white border-t md:pb-6">
@@ -41,7 +46,8 @@ export function PartnerBottomTabs() {
           const active = tab.exact
             ? pathname === tab.href
             : pathname?.startsWith(tab.href);
-          const showBadge = tab.label === "Messages" && totalUnread > 0;
+          const showBadge =
+            tab.label === "Messages" && inboxLoaded && totalUnread > 0;
 
           return (
             <Link
@@ -58,8 +64,11 @@ export function PartnerBottomTabs() {
                   strokeWidth={active ? 2.5 : 2}
                 />
                 {showBadge && (
-                  <span className="absolute -top-1 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-white">
-                    {totalUnread > 9 ? "9+" : totalUnread}
+                  <span
+                    className="absolute -top-1 -right-1.5 flex h-4 min-w-4 max-w-[2.25rem] items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-bold text-primary-foreground"
+                    aria-label={`${totalUnread} unread messages`}
+                  >
+                    {totalUnread > 99 ? "99+" : totalUnread}
                   </span>
                 )}
               </div>

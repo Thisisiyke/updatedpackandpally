@@ -1,5 +1,5 @@
-import Link from "next/link";
 import Image from "next/image";
+import { HostApplyButton } from "@/components/auth/host-apply-button";
 import {
   DollarSign,
   Globe,
@@ -8,10 +8,8 @@ import {
   Map,
   Users,
   Wallet,
-  ChevronRight,
   Star,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import {
   Accordion,
   AccordionContent,
@@ -65,7 +63,7 @@ const steps = [
     icon: Wallet,
     title: "Earn",
     description:
-      "Get paid within 48 hours of your trip ending. Build your reputation with reviews and ratings.",
+      "Travelers pay Pack & Pally first; we transfer your share to your connected bank on our payout schedule (often within ~48 hours after a trip ends). Build your reputation with reviews and ratings.",
   },
 ];
 
@@ -94,6 +92,10 @@ const faqs = [
     q: "How does Pack & Pally support hosts?",
     a: "We provide trip planning tools, AI itinerary generation, marketing support, 24/7 emergency assistance, payment processing, and a dedicated host success team to help you grow.",
   },
+  {
+    q: "When a traveler pays, where does the money go first?",
+    a: "Payments are charged to Pack & Pally's platform Stripe account (the business merchant account that runs the marketplace), not directly to the host. After the trip and according to our host agreement, Pack & Pally transfers the host's share to the host's Stripe-connected bank account, minus commissions and fees—so funds flow traveler → platform → host.",
+  },
 ];
 
 export default function BecomeAHostPage() {
@@ -119,9 +121,13 @@ export default function BecomeAHostPage() {
               places. Share your world, meet amazing people, and earn while doing
               what you love.
             </p>
-            <Button asChild size="lg" className="mt-8 text-base px-8 h-12">
-              <Link href="/partner/onboarding">Apply to Host</Link>
-            </Button>
+            <HostApplyButton
+              href="/partner/onboarding"
+              size="lg"
+              className="mt-8 text-base px-8 h-12"
+            >
+              Apply to Host
+            </HostApplyButton>
           </div>
         </Container>
       </section>
@@ -260,9 +266,13 @@ export default function BecomeAHostPage() {
             <p className="mt-4 text-lg text-white/70">
               Join our community of hosts and start leading adventures today.
             </p>
-            <Button asChild size="lg" className="mt-8 text-base px-8 h-12">
-              <Link href="/partner/onboarding">Apply Now</Link>
-            </Button>
+            <HostApplyButton
+              href="/partner/onboarding"
+              size="lg"
+              className="mt-8 text-base px-8 h-12"
+            >
+              Apply Now
+            </HostApplyButton>
           </div>
         </Container>
       </section>

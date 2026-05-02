@@ -18,10 +18,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { generateFlights, formatDuration, formatPrice } from "@/lib/flight-generator";
+import { useRequireMember } from "@/hooks/use-require-member";
 
 function SelectContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { ensureMember, loginDialog } = useRequireMember();
   const flightId = searchParams.get("flightId");
   const origin = searchParams.get("origin") || "";
   const destination = searchParams.get("destination") || "";
@@ -62,9 +64,11 @@ function SelectContent() {
   }
 
   const handleContinue = () => {
-    const params = new URLSearchParams(searchParams);
-    params.set("type", "flight");
-    router.push(`/checkout?${params.toString()}`);
+    ensureMember(() => {
+      const params = new URLSearchParams(searchParams);
+      params.set("type", "flight");
+      router.push(`/checkout?${params.toString()}`);
+    });
   };
 
   const formatDate = (dateStr: string) => {
@@ -78,6 +82,7 @@ function SelectContent() {
 
   return (
     <section className="pb-16">
+      {loginDialog}
       {/* Breadcrumb */}
       <div className="border-b bg-muted/30">
         <Container className="py-3">

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Image from "next/image";
-import { ChevronLeft, ChevronRight, Lock, DollarSign, Ban } from "lucide-react";
+import { ChevronLeft, ChevronRight, Lock, DollarSign, Ban, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -11,7 +11,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { partnerListings, partnerBookings } from "@/data/partner-listings";
+import type { PartnerListing } from "@/data/partner-listings";
+import { partnerBookings } from "@/data/partner-listings";
+import { fetchPartnerListingsList } from "@/lib/partner-listings-client";
 import { cn } from "@/lib/utils";
 
 function getDaysInMonth(year: number, month: number) {
@@ -23,11 +25,31 @@ function getFirstDayOfMonth(year: number, month: number) {
 }
 
 export default function PartnerCalendarPage() {
-  const [selectedListingId, setSelectedListingId] = useState(
-    partnerListings[0]?.id || ""
-  );
+  const [partnerListings, setPartnerListings] = useState<PartnerListing[]>([]);
+  const [listLoading, setListLoading] = useState(true);
+  const [selectedListingId, setSelectedListingId] = useState("");
   const [currentDate, setCurrentDate] = useState(new Date());
   const [blockedDates, setBlockedDates] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    void (async () => {
+      setListLoading(true);
+      try {
+        const { listings } = await fetchPartnerListingsList({ limit: 100 });
+        setPartnerListings(listings);
+      } catch {
+        setPartnerListings([]);
+      } finally {
+        setListLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (partnerListings.length > 0 && !selectedListingId) {
+      setSelectedListingId(partnerListings[0].id);
+    }
+  }, [partnerListings, selectedListingId]);
 
   const selectedListing = partnerListings.find(
     (l) => l.id === selectedListingId
@@ -110,11 +132,20 @@ export default function PartnerCalendarPage() {
         </div>
 
         <Select
-          value={selectedListingId}
+          value={selectedListingId || undefined}
           onValueChange={(v) => v && setSelectedListingId(v)}
+          disabled={listLoading || partnerListings.length === 0}
         >
           <SelectTrigger className="w-full sm:w-[280px]">
-            <SelectValue />
+            <SelectValue
+              placeholder={
+                listLoading
+                  ? "Loading listings…"
+                  : partnerListings.length === 0
+                    ? "No listings yet"
+                    : undefined
+              }
+            />
           </SelectTrigger>
           <SelectContent>
             {partnerListings.map((l) => (
@@ -124,6 +155,9 @@ export default function PartnerCalendarPage() {
             ))}
           </SelectContent>
         </Select>
+        {listLoading && (
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground sm:hidden" />
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">

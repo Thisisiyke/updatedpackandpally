@@ -3,8 +3,8 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
-import { useSession, signOut } from "next-auth/react";
+import { useRouter, usePathname } from "next/navigation";
+import { usePackPallyAuth } from "@/components/providers/session-provider";
 import { Menu, LogOut, LayoutDashboard, ChevronDown, User, Settings, Globe, HelpCircle, Heart, Gift, Users, MapPin, Building2, Sparkles, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,14 +14,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { navLinks } from "@/lib/constants";
+import { getMainNavLinks } from "@/lib/main-nav-links";
+import { isPackPallyHostUser } from "@/lib/host-access";
 import { MobileNav } from "./mobile-nav";
 import { LocaleModal } from "./locale-modal";
 import { LogoutDialog } from "@/components/shared/logout-dialog";
 
 export function Navbar() {
-  const { data: session, status } = useSession();
+  const { user: packUser, loading: authLoading, logout } = usePackPallyAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const mainNavLinks = getMainNavLinks(pathname, packUser);
   const [visible, setVisible] = useState(true);
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -55,7 +58,15 @@ export function Navbar() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  const isLoggedIn = status === "authenticated" && session?.user;
+  const user = packUser
+    ? {
+        name: packUser.name,
+        email: packUser.email,
+        image: packUser.image,
+        role: packUser.role,
+      }
+    : undefined;
+  const isLoggedIn = !authLoading && !!user;
 
   return (
     <>
@@ -85,9 +96,9 @@ export function Navbar() {
 
           {/* Desktop Nav */}
           <nav className="hidden lg:flex items-center gap-8">
-            {navLinks.map((link) => (
+            {mainNavLinks.map((link) => (
               <Link
-                key={link.href}
+                key={`${link.label}-${link.href}`}
                 href={link.href}
                 className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
               >
@@ -99,37 +110,34 @@ export function Navbar() {
           {/* Desktop Auth */}
           <div className="hidden lg:flex items-center gap-3">
             {/* Locale button */}
-            <button
+            {/* <button
               onClick={() => setLocaleOpen(true)}
               className="flex h-9 w-9 items-center justify-center rounded-full border transition-colors hover:bg-accent"
             >
               <Globe className="h-4 w-4 text-muted-foreground" />
-            </button>
+            </button> */}
 
-            {isLoggedIn ? (
+            {isLoggedIn && user ? (
               <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <button className="flex items-center gap-2 rounded-full border pl-1 pr-2.5 py-1 transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-                  }
-                >
+                <DropdownMenuTrigger className="flex items-center gap-2 rounded-full border pl-1 pr-2.5 py-1 transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <div className="relative h-7 w-7 overflow-hidden rounded-full bg-primary/10">
-                    {session.user.image ? (
+                    {user.image ? (
                       <Image
-                        src={session.user.image}
+                        src={user.image}
                         alt=""
                         fill
                         className="object-cover"
                         sizes="28px"
+                        unoptimized
                       />
                     ) : (
                       <span className="flex h-full w-full items-center justify-center text-xs font-bold text-primary">
-                        {session.user.name?.charAt(0).toUpperCase()}
+                        {user.name?.charAt(0).toUpperCase()}
                       </span>
                     )}
                   </div>
                   <span className="text-sm font-medium">
-                    {session.user.name?.split(" ")[0]}
+                    {user.name?.split(" ")[0]}
                   </span>
                   <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                 </DropdownMenuTrigger>
@@ -146,7 +154,7 @@ export function Navbar() {
                   <DropdownMenuSeparator className="my-0" />
 
                   {/* Partner portal - featured item */}
-                  {(session.user as any).role === "host" ? (
+                  {isPackPallyHostUser(packUser) ? (
                     <DropdownMenuItem
                       onClick={() => router.push("/partner")}
                       className="px-4 py-4 rounded-none"
@@ -194,7 +202,7 @@ export function Navbar() {
                   <DropdownMenuSeparator className="my-0" />
 
                   {/* Admin portal (for admin users only) */}
-                  {(session.user as any).role === "admin" && (
+                  {user.role === "admin" && (
                     <>
                       <DropdownMenuItem
                         onClick={() => router.push("/admin")}
@@ -276,16 +284,20 @@ export function Navbar() {
       <MobileNav
         open={mobileOpen}
         onClose={() => setMobileOpen(false)}
-        session={session}
+        user={packUser}
         onOpenLocale={() => setLocaleOpen(true)}
       />
 
-      <LocaleModal open={localeOpen} onClose={() => setLocaleOpen(false)} />
+      {/* <LocaleModal open={localeOpen} onClose={() => setLocaleOpen(false)} /> */}
 
       <LogoutDialog
         open={logoutOpen}
         onClose={() => setLogoutOpen(false)}
-        onConfirm={() => signOut({ callbackUrl: "/" })}
+        onConfirm={async () => {
+          await logout();
+          router.push("/");
+          router.refresh();
+        }}
       />
     </>
   );

@@ -27,6 +27,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { PackingList } from "@/types";
 import { generatePackingList } from "@/lib/ai/mock-packing-list";
+import { useRequireMember } from "@/hooks/use-require-member";
 
 const climates = [
   { value: "tropical", label: "Tropical" },
@@ -38,6 +39,7 @@ const climates = [
 const activityOptions = ["Hiking", "Beach", "City", "Snow"];
 
 export function PackingListGenerator() {
+  const { ensureMember, loginDialog, authLoading } = useRequireMember();
   const [destination, setDestination] = useState("");
   const [duration, setDuration] = useState("7");
   const [climate, setClimate] = useState("");
@@ -56,7 +58,7 @@ export function PackingListGenerator() {
     );
   };
 
-  const handleGenerate = async () => {
+  const runGenerate = async () => {
     if (!destination || !climate) return;
     setStatus("generating");
 
@@ -70,6 +72,10 @@ export function PackingListGenerator() {
     setList(result);
     setExpandedCategories(new Set(result.categories.map((c) => c.name)));
     setStatus("complete");
+  };
+
+  const handleGenerate = () => {
+    ensureMember(() => void runGenerate());
   };
 
   const toggleItem = (categoryName: string, itemId: string) => {
@@ -185,24 +191,28 @@ export function PackingListGenerator() {
   // Generating
   if (status === "generating") {
     return (
-      <Card className="mx-auto max-w-2xl">
-        <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-          <ListChecks className="h-12 w-12 text-primary animate-pulse" />
-          <h3 className="mt-6 text-xl font-bold">
-            Building Your Packing List
-          </h3>
-          <p className="mt-2 text-muted-foreground">
-            Analyzing destination and activities...
-          </p>
-          <Progress value={50} className="mt-6 w-64 h-2" />
-        </CardContent>
-      </Card>
+      <>
+        <Card className="mx-auto max-w-2xl">
+          <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+            <ListChecks className="h-12 w-12 text-primary animate-pulse" />
+            <h3 className="mt-6 text-xl font-bold">
+              Building Your Packing List
+            </h3>
+            <p className="mt-2 text-muted-foreground">
+              Analyzing destination and activities...
+            </p>
+            <Progress value={50} className="mt-6 w-64 h-2" />
+          </CardContent>
+        </Card>
+        {loginDialog}
+      </>
     );
   }
 
   // Result
   if (status === "complete" && list) {
     return (
+      <>
       <div className="mx-auto max-w-2xl space-y-6">
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -339,11 +349,14 @@ export function PackingListGenerator() {
           Generate New List
         </Button>
       </div>
+      {loginDialog}
+      </>
     );
   }
 
   // Form
   return (
+    <>
     <Card className="mx-auto max-w-2xl">
       <CardContent className="pt-6 space-y-6">
         <div className="text-center mb-2">
@@ -421,7 +434,7 @@ export function PackingListGenerator() {
 
         <Button
           className="w-full h-11 gap-2"
-          disabled={!destination || !climate}
+          disabled={!destination || !climate || authLoading}
           onClick={handleGenerate}
         >
           <ListChecks className="h-4 w-4" />
@@ -429,5 +442,7 @@ export function PackingListGenerator() {
         </Button>
       </CardContent>
     </Card>
+    {loginDialog}
+    </>
   );
 }

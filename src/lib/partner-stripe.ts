@@ -13,14 +13,7 @@ export function markStripeConnected(): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(STRIPE_CONNECTED_KEY, "true");
-    localStorage.setItem(
-      "packpally_stripe_account_id",
-      `acct_${Math.random().toString(36).slice(2, 18)}`
-    );
-    localStorage.setItem(
-      "packpally_stripe_connected_at",
-      new Date().toISOString()
-    );
+    localStorage.setItem("packpally_stripe_connected_at", new Date().toISOString());
   } catch {}
 }
 

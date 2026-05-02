@@ -7,8 +7,8 @@ import Link from "next/link";
 import { Send, Users, ChevronLeft, Info } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { useConversations } from "@/hooks/use-conversations";
-import { CURRENT_PARTNER } from "@/data/conversations";
+import { useTravelerMessagesApi } from "@/hooks/use-traveler-messages-api";
+import { usePackPallyAuth } from "@/components/providers/session-provider";
 import { formatTime, formatDay } from "@/lib/format-time";
 import type { Message, Participant } from "@/types/messaging";
 import { cn } from "@/lib/utils";
@@ -34,19 +34,31 @@ export default function MobilePartnerThreadPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
-  const { getConversation, getMessages, sendMessage, markRead, hydrated } =
-    useConversations("partner");
+  const { user: packUser } = usePackPallyAuth();
+  const useLive =
+    Boolean(packUser?.id) && packUser?.role !== "guest";
+  const {
+    conversations,
+    getMessages,
+    sendMessage,
+    markRead,
+    hydrated,
+    loadThread,
+    meId,
+    threadLoading,
+  } = useTravelerMessagesApi(useLive);
 
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const conversation = getConversation(id);
+  const conversation = useMemo(
+    () => conversations.find((c) => c.id === id),
+    [conversations, id]
+  );
   const msgs = useMemo(() => getMessages(id), [getMessages, id]);
   const grouped = useMemo(() => groupByDay(msgs), [msgs]);
   const isGroup = !!conversation?.isGroup;
-  const other = conversation?.participants.find(
-    (p) => p.id !== CURRENT_PARTNER.id
-  );
+  const other = conversation?.participants.find((p) => p.id !== meId);
 
   const participantById = useMemo(() => {
     const map = new Map<string, Participant>();
@@ -55,8 +67,14 @@ export default function MobilePartnerThreadPage({
   }, [conversation]);
 
   useEffect(() => {
+    if (useLive && meId) {
+      void loadThread(id);
+    }
+  }, [useLive, meId, id, loadThread]);
+
+  useEffect(() => {
     if (hydrated && conversation && conversation.unreadCount > 0) {
-      markRead(id);
+      void markRead(id);
     }
   }, [hydrated, id, conversation, markRead]);
 
@@ -71,6 +89,25 @@ export default function MobilePartnerThreadPage({
     return (
       <div className="flex h-full min-h-[844px] items-center justify-center text-sm text-muted-foreground">
         Loading…
+      </div>
+    );
+  }
+
+  if (!useLive || !meId) {
+    return (
+      <div className="flex h-full min-h-[844px] flex-col">
+        <header className="sticky top-0 z-30 bg-white border-b flex items-center gap-2 px-3 py-2 md:pt-14">
+          <button
+            onClick={() => router.push("/mobile/partner/messages")}
+            className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-muted"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+          <p className="font-semibold">Messages</p>
+        </header>
+        <div className="flex-1 flex items-center justify-center p-6 text-center text-sm text-muted-foreground">
+          Sign in to view this conversation.
+        </div>
       </div>
     );
   }
@@ -105,7 +142,7 @@ export default function MobilePartnerThreadPage({
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
-    sendMessage(id, input);
+    void sendMessage(id, input);
     setInput("");
   };
 
@@ -192,7 +229,11 @@ export default function MobilePartnerThreadPage({
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-4">
-        {grouped.length === 0 ? (
+        {threadLoading && grouped.length === 0 ? (
+          <div className="py-20 text-center text-xs text-muted-foreground">
+            Loading messages…
+          </div>
+        ) : grouped.length === 0 ? (
           <div className="py-20 text-center text-xs text-muted-foreground">
             No messages yet — say hi.
           </div>
@@ -203,7 +244,7 @@ export default function MobilePartnerThreadPage({
                 {g.label}
               </p>
               {g.items.map((m, i) => {
-                const mine = m.senderId === CURRENT_PARTNER.id;
+                const mine = m.senderId === meId;
                 const sender = participantById.get(m.senderId);
                 const prev = g.items[i - 1];
                 const newSender = !prev || prev.senderId !== m.senderId;

@@ -27,8 +27,8 @@ export interface PartnerBooking {
   /** If partial, the remaining-payment deadline. */
   paymentDueAt?: string;
   createdAt: string;
-  /** "seed" entries are fixed demo rows; "local" are from localStorage. */
-  source: "seed" | "local";
+  /** "seed" demo rows; "local" from localStorage; "api" from wanderly-1. */
+  source: "seed" | "local" | "api";
 }
 
 function daysFromNow(days: number) {
@@ -324,7 +324,19 @@ function tripIdAliases(tripId: string): string[] {
   return Array.from(aliases);
 }
 
+function isWanderlyCompositeTripRouteId(tripId: string): boolean {
+  try {
+    const raw = tripId.includes("%") ? decodeURIComponent(tripId) : tripId;
+    return raw.includes("__");
+  } catch {
+    return tripId.includes("__");
+  }
+}
+
 export function getBookingsForTrip(tripId: string): PartnerBooking[] {
+  if (isWanderlyCompositeTripRouteId(tripId)) {
+    return [];
+  }
   const aliases = tripIdAliases(tripId);
   const match = (b: PartnerBooking) => aliases.includes(b.tripId);
   const combined = [

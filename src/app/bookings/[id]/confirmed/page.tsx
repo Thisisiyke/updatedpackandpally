@@ -17,6 +17,7 @@ import {
   ChevronRight,
   MessageCircle,
   PartyPopper,
+  Compass,
 } from "lucide-react";
 import { Container } from "@/components/shared/container";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,7 @@ interface StoredBooking {
   flight: any;
   hotel: any;
   room: any;
+  trip: any;
   checkIn: string | null;
   checkOut: string | null;
   guests: number | null;
@@ -44,11 +46,68 @@ interface StoredBooking {
   specialRequests: string;
 }
 
+type WanderlyConfirmPayload = {
+  booking: Record<string, unknown>;
+  trip: {
+    title?: string;
+    destination?: string;
+    country?: string;
+    startDate?: string;
+    endDate?: string;
+    coverImage?: string;
+  };
+};
+
 function ConfirmedContent({ id }: { id: string }) {
   const [booking, setBooking] = useState<StoredBooking | null>(null);
+  const [wanderly, setWanderly] = useState<WanderlyConfirmPayload | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    try {
+      const rawSession = sessionStorage.getItem(`pp_confirm_${id}`);
+      if (rawSession) {
+        const parsed = JSON.parse(rawSession) as WanderlyConfirmPayload;
+        if (parsed?.booking && parsed?.trip) {
+          const b = parsed.booking;
+          const parts = Array.isArray(b.amountPaid) ? b.amountPaid : [];
+          const first = parts[0] as { installment1?: string } | undefined;
+          const paid = first ? Number(first.installment1 || 0) : 0;
+          const toPay = Number(b.amountToPay ?? 0);
+          const partial = b.paymentStatus === "partial";
+          const total = partial ? paid + toPay : paid;
+          setWanderly(parsed);
+          setBooking({
+            bookingId: id,
+            type: "trip",
+            createdAt: new Date(Number(b.timestamp ?? Date.now())).toISOString(),
+            contact: {
+              firstName: String(b.firstName ?? ""),
+              lastName: String(b.lastName ?? ""),
+              email: String(b.email ?? ""),
+              phone: String(b.mobile ?? ""),
+            },
+            totalPrice: total || paid,
+            flight: null,
+            hotel: null,
+            room: null,
+            trip: parsed.trip,
+            checkIn: String(b.startDate ?? ""),
+            checkOut: String(b.endDate ?? ""),
+            guests: Number(b.bookedCount ?? 1),
+            rooms: null,
+            departDate: null,
+            returnDate: null,
+            passengers: null,
+            specialRequests: "",
+          });
+          setLoading(false);
+          return;
+        }
+      }
+    } catch {
+      /* fall through */
+    }
     try {
       const bookings = JSON.parse(
         localStorage.getItem("packpally_bookings") || "[]"
@@ -87,6 +146,7 @@ function ConfirmedContent({ id }: { id: string }) {
 
   const isFlight = booking.type === "flight";
   const isTrip = booking.type === "trip";
+  const wanderlyTrip = wanderly?.trip;
   const formatDate = (dateStr: string) =>
     new Date(dateStr).toLocaleDateString("en-US", {
       weekday: "long",
@@ -115,8 +175,9 @@ function ConfirmedContent({ id }: { id: string }) {
           </h1>
           <p className="mt-3 text-muted-foreground animate-[fade-in-up_500ms_ease-out_400ms_both]">
             Thank you, {booking.contact.firstName}. Your{" "}
-            {isFlight ? "flight" : "stay"} is all set. We&apos;ve sent a
-            confirmation to <strong>{booking.contact.email}</strong>.
+            {isFlight ? "flight" : isTrip ? "trip" : "stay"} is all set.
+            We&apos;ve sent a confirmation to{" "}
+            <strong>{booking.contact.email}</strong>.
           </p>
 
           <div className="mt-6 inline-flex items-center gap-2 rounded-full border bg-white px-4 py-2 text-sm animate-[fade-in-up_500ms_ease-out_500ms_both]">
@@ -132,10 +193,16 @@ function ConfirmedContent({ id }: { id: string }) {
               <h2 className="text-lg font-bold flex items-center gap-2">
                 {isFlight ? (
                   <Plane className="h-5 w-5 text-primary rotate-45" />
+                ) : isTrip ? (
+                  <Compass className="h-5 w-5 text-primary" />
                 ) : (
                   <HotelIcon className="h-5 w-5 text-primary" />
                 )}
-                {isFlight ? "Flight details" : "Stay details"}
+                {isFlight
+                  ? "Flight details"
+                  : isTrip
+                    ? "Trip details"
+                    : "Stay details"}
               </h2>
               <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">
                 Confirmed
@@ -291,6 +358,59 @@ function ConfirmedContent({ id }: { id: string }) {
                   <div>
                     <p className="text-xs text-muted-foreground">Rooms</p>
                     <p className="text-sm font-semibold">{booking.rooms}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {isTrip && (wanderlyTrip || booking.trip) && (
+              <div className="space-y-4">
+                <div className="flex gap-4">
+                  {(wanderlyTrip?.coverImage || booking.trip?.coverImage) && (
+                    <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl">
+                      <Image
+                        src={
+                          (wanderlyTrip?.coverImage ||
+                            booking.trip?.coverImage) as string
+                        }
+                        alt={(wanderlyTrip?.title || booking.trip?.title) as string}
+                        fill
+                        className="object-cover"
+                        sizes="96px"
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <h3 className="font-bold text-lg">
+                      {wanderlyTrip?.title || booking.trip?.title}
+                    </h3>
+                    <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
+                      <MapPin className="h-3 w-3" />
+                      {wanderlyTrip?.destination || booking.trip?.destination}
+                      {wanderlyTrip?.country || booking.trip?.country
+                        ? `, ${wanderlyTrip?.country || booking.trip?.country}`
+                        : ""}
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 rounded-xl bg-muted/30 p-4 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Start</p>
+                    <p className="font-semibold">
+                      {booking.checkIn &&
+                        formatDate(booking.checkIn)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">End</p>
+                    <p className="font-semibold">
+                      {booking.checkOut &&
+                        formatDate(booking.checkOut)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Travelers</p>
+                    <p className="font-semibold">{booking.guests}</p>
                   </div>
                 </div>
               </div>

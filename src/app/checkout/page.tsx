@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -33,12 +33,12 @@ import {
   generateFlights,
   formatDuration,
   formatPrice,
-} from "@/lib/flight-generator";
+} from "@/lib/inventory/flights";
 import {
   generateHotels,
   formatHotelPrice,
   calculateNights,
-} from "@/lib/hotel-generator";
+} from "@/lib/inventory/hotels";
 import {
   depositAmount,
   remainingAmount,
@@ -50,8 +50,19 @@ import {
 } from "@/lib/trip-pricing";
 import { trips } from "@/data/trips";
 import { hosts } from "@/data/hosts";
+import type { Trip } from "@/types";
 import { joinTripGroupChat } from "@/hooks/use-conversations";
 import { cn } from "@/lib/utils";
+import { usePackPallyAuth } from "@/components/providers/session-provider";
+import { isPackPallyMember } from "@/lib/member-auth";
+import { wanderlyBookingAmounts } from "@/lib/wanderly-booking-math";
+import { buildBookTripBody } from "@/lib/wanderly-book-trip";
+import {
+  WanderlyTripStripeRoot,
+  WanderlyPaymentSection,
+  WanderlyConfirmPaymentButton,
+  wanderlyStripePromise,
+} from "@/components/checkout/wanderly-trip-stripe";
 
 function CheckoutContent() {
   const router = useRouter();
@@ -81,6 +92,31 @@ function CheckoutContent() {
   const tripId = searchParams.get("tripId");
   const initialTravelers = Math.max(1, Number(searchParams.get("travelers") || "1"));
 
+  const { user: packUser, loading: authLoading } = usePackPallyAuth();
+  const [apiTrip, setApiTrip] = useState<Trip | null>(null);
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [piCustomerId, setPiCustomerId] = useState<string>("");
+  const [bookingError, setBookingError] = useState("");
+
+  useEffect(() => {
+    if (!tripId) return;
+    const seed = trips.find((t) => t.id === tripId);
+    if (seed) {
+      setApiTrip(seed);
+      return;
+    }
+    let c = false;
+    fetch(`/api/trips/${encodeURIComponent(tripId)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!c && d.trip) setApiTrip(d.trip);
+      })
+      .catch(() => {});
+    return () => {
+      c = true;
+    };
+  }, [tripId]);
+
   const flights = useMemo(() => {
     if (type !== "flight") return [];
     return generateFlights({
@@ -98,7 +134,11 @@ function CheckoutContent() {
   const selectedFlight = type === "flight" ? flights.find((f) => f.id === flightId) : null;
   const selectedHotel = type === "hotel" ? hotels.find((h) => h.id === hotelId) : null;
   const selectedRoom = selectedHotel?.roomTypes.find((r) => r.id === roomId) || selectedHotel?.roomTypes[0];
-  const selectedTrip = type === "trip" ? trips.find((t) => t.id === tripId) : null;
+  const selectedTrip =
+    type === "trip"
+      ? apiTrip || trips.find((t) => t.id === tripId) || null
+      : null;
+
   const nights = type === "hotel" ? calculateNights(checkIn, checkOut) : 0;
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -119,6 +159,75 @@ function CheckoutContent() {
     Math.min(initialTravelers, selectedTrip ? spotsAvailable : initialTravelers)
   );
   const [paymentMode, setPaymentMode] = useState<"full" | "partial">("full");
+
+  const wAmt =
+    selectedTrip?.wanderly &&
+    wanderlyBookingAmounts(
+      selectedTrip.price,
+      selectedTrip.wanderly.tripTax,
+      tripTravelers
+    );
+
+  const useWanderlyStripe =
+    type === "trip" &&
+    Boolean(selectedTrip?.wanderly) &&
+    isPackPallyMember(packUser) &&
+    Boolean(wanderlyStripePromise);
+
+  useEffect(() => {
+    if (step !== 3) {
+      setClientSecret(null);
+    }
+  }, [step]);
+
+  useEffect(() => {
+    setClientSecret(null);
+  }, [paymentMode]);
+
+  useEffect(() => {
+    if (step !== 3 || !useWanderlyStripe || !wAmt || !firstName || !email) {
+      return;
+    }
+    const amount =
+      paymentMode === "partial" ? wAmt.GrandpartialAmt : wAmt.GrandFullAmt;
+    let cancelled = false;
+    fetch("/api/bookings/payment-intent", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email,
+        name: `${firstName} ${lastName}`.trim(),
+        amount,
+        currency: "usd",
+        tripId: selectedTrip?.wanderly?._id,
+        tripTimestamp: selectedTrip?.wanderly?.timestamp,
+        userId: packUser?.id || "",
+        paymentMode,
+      }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled && d.clientSecret) {
+          setClientSecret(d.clientSecret);
+          if (d.customer) setPiCustomerId(d.customer);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    step,
+    useWanderlyStripe,
+    wAmt,
+    paymentMode,
+    firstName,
+    lastName,
+    email,
+    selectedTrip?.wanderly?._id,
+    selectedTrip?.wanderly?.timestamp,
+  ]);
 
   // Step 2: Payment
   const [cardNumber, setCardNumber] = useState("");
@@ -145,6 +254,37 @@ function CheckoutContent() {
     );
   }
 
+  if (authLoading) {
+    return (
+      <Container className="py-24 text-center text-muted-foreground text-sm">
+        Loading…
+      </Container>
+    );
+  }
+
+  if (!isPackPallyMember(packUser)) {
+    const nextPath =
+      searchParams.toString().length > 0
+        ? `/checkout?${searchParams.toString()}`
+        : "/checkout";
+    return (
+      <Container className="py-16">
+        <div className="mx-auto max-w-md text-center">
+          <h1 className="text-2xl font-bold">Sign in to complete your booking</h1>
+          <p className="text-muted-foreground mt-2">
+            You can browse flights, hotels, and trips without an account. Sign in
+            or create one to pay and confirm.
+          </p>
+          <Button asChild className="mt-6">
+            <Link href={`/login?next=${encodeURIComponent(nextPath)}`}>
+              Sign in
+            </Link>
+          </Button>
+        </div>
+      </Container>
+    );
+  }
+
   // Calculate totals
   const tripPricing = selectedTrip
     ? {
@@ -163,23 +303,111 @@ function CheckoutContent() {
   const breakdown = calculatePriceBreakdown(subtotal, selectedTrip?.taxRate);
   const taxes = breakdown.tax + breakdown.platformFee;
   const total = breakdown.total;
+
+  // For real Wanderly trips, use wanderly math (20% partial, 12% service, 8.25% tax).
+  // For other booking types (hotel/flight), fall back to the generic 30% deposit model.
+  const wanderlyPartialDueNow = wAmt ? wAmt.GrandpartialAmt : null;
+  const wanderlyPartialDueLater = wAmt
+    ? Number((wAmt.GrandFullAmt - wAmt.GrandpartialAmt).toFixed(2))
+    : null;
+
   const amountDueNow =
-    type === "trip" && paymentMode === "partial" ? depositAmount(total) : total;
+    type === "trip" && paymentMode === "partial"
+      ? useWanderlyStripe && wanderlyPartialDueNow !== null
+        ? wanderlyPartialDueNow
+        : depositAmount(total)
+      : useWanderlyStripe && wAmt
+      ? wAmt.GrandFullAmt
+      : total;
   const amountDueLater =
-    type === "trip" && paymentMode === "partial" ? remainingAmount(total) : 0;
+    type === "trip" && paymentMode === "partial"
+      ? useWanderlyStripe && wanderlyPartialDueLater !== null
+        ? wanderlyPartialDueLater
+        : remainingAmount(total)
+      : 0;
+
+  // Label: "20% deposit" for wanderly trips, "30% deposit" for generic.
+  const depositPctLabel = useWanderlyStripe ? 20 : Math.round(DEPOSIT_PERCENT * 100);
+  // Due-date copy: wanderly stores scheduleDateToPay = 1 week before start.
+  const remainingDueCopy = useWanderlyStripe
+    ? "1 week before departure"
+    : "30 days before departure";
 
   const handleStep1Next = () => {
     if (!firstName || !lastName || !email || !phone) return;
+    if (type === "trip" && selectedTrip?.wanderly && !isPackPallyMember(packUser)) {
+      const nextPath =
+        searchParams.toString().length > 0
+          ? `/checkout?${searchParams.toString()}`
+          : "/checkout";
+      router.push(`/login?next=${encodeURIComponent(nextPath)}`);
+      return;
+    }
     setStep(2);
   };
 
+  const finalizeWanderlyBooking = async (paymentIntentId: string) => {
+    if (!selectedTrip?.wanderly || !isPackPallyMember(packUser)) return;
+    const member = packUser!;
+    const body = buildBookTripBody({
+      trip: selectedTrip,
+      travelers: tripTravelers,
+      paymentMode,
+      firstName,
+      lastName,
+      email,
+      mobile: phone,
+      userId: member.id,
+      userProfileImg: member.image,
+      paymentIntentId,
+      customerId: piCustomerId,
+    });
+    const res = await fetch("/api/bookings/complete", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok || data.status !== "success") {
+      throw new Error(data.message || "Booking failed");
+    }
+    const bid = data.booking?._id || `PP${Date.now().toString(36).toUpperCase()}`;
+    try {
+      sessionStorage.setItem(
+        `pp_confirm_${bid}`,
+        JSON.stringify({ booking: data.booking, trip: selectedTrip })
+      );
+    } catch {
+      /* ignore */
+    }
+    router.push(`/bookings/${encodeURIComponent(bid)}/confirmed`);
+  };
+
   const handleConfirm = async () => {
+    if (useWanderlyStripe && clientSecret) {
+      return;
+    }
+    if (type === "trip" && selectedTrip?.wanderly) {
+      if (!wanderlyStripePromise) {
+        setBookingError("Stripe is not configured (missing publishable key).");
+        return;
+      }
+      if (!isPackPallyMember(packUser)) {
+        const nextPath =
+          searchParams.toString().length > 0
+            ? `/checkout?${searchParams.toString()}`
+            : "/checkout";
+        router.push(`/login?next=${encodeURIComponent(nextPath)}`);
+        return;
+      }
+      setBookingError("Complete payment with the card form above.");
+      return;
+    }
     setProcessing(true);
-    // Simulate payment processing
     await new Promise((r) => setTimeout(r, 1500));
     const bookingId = `PP${Date.now().toString(36).toUpperCase()}`;
 
-    // Save to localStorage for demo purposes
     const bookingData = {
       bookingId,
       type,
@@ -210,7 +438,9 @@ function CheckoutContent() {
       );
       existing.push(bookingData);
       localStorage.setItem("packpally_bookings", JSON.stringify(existing));
-    } catch {}
+    } catch {
+      /* ignore */
+    }
 
     if (selectedTrip) {
       const tripHost = hosts.find((h) => h.id === selectedTrip.hostId);
@@ -218,6 +448,7 @@ function CheckoutContent() {
     }
 
     router.push(`/bookings/${bookingId}/confirmed`);
+    setProcessing(false);
   };
 
   const formatCardNumber = (value: string) => {
@@ -463,6 +694,14 @@ function CheckoutContent() {
                   All transactions are secure and encrypted
                 </p>
 
+                {type === "trip" && selectedTrip?.wanderly && !wanderlyStripePromise && (
+                  <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    Card payments need{" "}
+                    <code className="text-xs">NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code>{" "}
+                    in your environment.
+                  </div>
+                )}
+
                 {type === "trip" && (
                   <div className="mb-6">
                     <h3 className="font-semibold mb-3 flex items-center gap-1.5">
@@ -505,24 +744,26 @@ function CheckoutContent() {
                       >
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-semibold text-sm">
-                            Pay {Math.round(DEPOSIT_PERCENT * 100)}% deposit
+                            Pay {depositPctLabel}% deposit
                           </span>
                           {paymentMode === "partial" && (
                             <Check className="h-4 w-4 text-primary" />
                           )}
                         </div>
                         <p className="text-xl font-bold">
-                          ${depositAmount(total).toLocaleString()}
+                          ${amountDueNow.toLocaleString()}
                         </p>
                         <p className="text-xs text-muted-foreground mt-1">
-                          ${remainingAmount(total).toLocaleString()} due 30 days
-                          before departure
+                          ${(wanderlyPartialDueLater ?? remainingAmount(total)).toLocaleString()} due{" "}
+                          {remainingDueCopy}
                         </p>
                       </button>
                     </div>
                   </div>
                 )}
 
+                {!useWanderlyStripe ? (
+                  <>
                 {/* Card preview */}
                 <div className="mb-6 relative h-48 rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 text-white overflow-hidden">
                   <div className="absolute inset-0 bg-gradient-to-tr from-primary/20 to-transparent" />
@@ -638,6 +879,13 @@ function CheckoutContent() {
                     </div>
                   </div>
                 </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground mb-6">
+                    On the next step you&apos;ll enter card details in a secure Stripe
+                    form. Your card is not stored on our servers.
+                  </p>
+                )}
 
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-between">
                   <Button variant="outline" onClick={() => setStep(1)}>
@@ -647,12 +895,14 @@ function CheckoutContent() {
                     size="lg"
                     onClick={() => setStep(3)}
                     disabled={
-                      !cardNumber ||
-                      !cardName ||
-                      !expiry ||
-                      !cvc ||
-                      !billingAddress ||
-                      !billingCity
+                      useWanderlyStripe
+                        ? !wanderlyStripePromise
+                        : !cardNumber ||
+                          !cardName ||
+                          !expiry ||
+                          !cvc ||
+                          !billingAddress ||
+                          !billingCity
                     }
                   >
                     Review booking
@@ -820,7 +1070,7 @@ function CheckoutContent() {
                       <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-3">
                         <p className="text-xs font-semibold text-amber-900 flex items-center gap-1.5">
                           <Wallet className="h-3.5 w-3.5" />
-                          Partial payment plan
+                          Partial payment plan — {depositPctLabel}% deposit
                         </p>
                         <div className="mt-2 space-y-1 text-xs text-amber-900/80">
                           <div className="flex items-center justify-between">
@@ -830,7 +1080,7 @@ function CheckoutContent() {
                             </span>
                           </div>
                           <div className="flex items-center justify-between">
-                            <span>Remaining (30 days before departure)</span>
+                            <span>Remaining ({remainingDueCopy})</span>
                             <span className="font-semibold">
                               ${amountDueLater.toLocaleString()}
                             </span>
@@ -854,21 +1104,67 @@ function CheckoutContent() {
                 </div>
 
                 {/* Payment method */}
-                <div className="rounded-xl border p-4 mb-6">
-                  <h3 className="font-bold mb-3">Payment method</h3>
-                  <div className="flex items-center gap-2 text-sm">
-                    <CreditCard className="h-4 w-4" />
-                    <span>
-                      •••• •••• •••• {cardNumber.replace(/\s/g, "").slice(-4)}
-                    </span>
+                {useWanderlyStripe ? (
+                  <div className="rounded-xl border p-4 mb-6 space-y-3">
+                    <h3 className="font-bold">Secure payment</h3>
+                    {bookingError ? (
+                      <p className="text-sm text-red-600">{bookingError}</p>
+                    ) : null}
+                    {!wanderlyStripePromise ? (
+                      <p className="text-sm text-muted-foreground">
+                        Add NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY to enable payments.
+                      </p>
+                    ) : !clientSecret ? (
+                      <p className="text-sm text-muted-foreground">
+                        Preparing secure payment…
+                      </p>
+                    ) : (
+                      <WanderlyTripStripeRoot clientSecret={clientSecret}>
+                        <WanderlyPaymentSection />
+                        <div className="mt-4">
+                          <WanderlyConfirmPaymentButton
+                            label={
+                              type === "trip" && paymentMode === "partial"
+                                ? `Pay deposit ${formatHotelPrice(amountDueNow)}`
+                                : `Pay ${formatHotelPrice(amountDueNow)}`
+                            }
+                            disabled={processing}
+                            onPaid={async (paymentIntentId) => {
+                              setBookingError("");
+                              setProcessing(true);
+                              try {
+                                await finalizeWanderlyBooking(paymentIntentId);
+                              } catch (e: unknown) {
+                                setBookingError(
+                                  e instanceof Error ? e.message : "Booking failed"
+                                );
+                              } finally {
+                                setProcessing(false);
+                              }
+                            }}
+                          />
+                        </div>
+                      </WanderlyTripStripeRoot>
+                    )}
                   </div>
-                </div>
+                ) : (
+                  <div className="rounded-xl border p-4 mb-6">
+                    <h3 className="font-bold mb-3">Payment method</h3>
+                    <div className="flex items-center gap-2 text-sm">
+                      <CreditCard className="h-4 w-4" />
+                      <span>
+                        •••• •••• ••••{" "}
+                        {cardNumber.replace(/\s/g, "").slice(-4) || "••••"}
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Terms */}
                 <div className="rounded-xl bg-muted/50 p-4 text-xs text-muted-foreground mb-6">
                   <p>
-                    By clicking &quot;Confirm and pay&quot; you agree to our Terms of Service,
-                    Privacy Policy, and the provider&apos;s cancellation policy.
+                    By confirming you agree to our Terms of Service, Privacy Policy,
+                    and the provider&apos;s cancellation policy.
                   </p>
                 </div>
 
@@ -880,23 +1176,29 @@ function CheckoutContent() {
                   >
                     Back to payment
                   </Button>
-                  <Button
-                    size="lg"
-                    onClick={handleConfirm}
-                    disabled={processing}
-                    className="sm:min-w-[200px]"
-                  >
-                    {processing ? (
-                      "Processing..."
-                    ) : (
-                      <>
-                        <Lock className="h-4 w-4" />
-                        {type === "trip" && paymentMode === "partial"
-                          ? `Pay deposit ${formatHotelPrice(amountDueNow)}`
-                          : `Confirm and pay ${formatHotelPrice(total)}`}
-                      </>
-                    )}
-                  </Button>
+                  {!(useWanderlyStripe && clientSecret && wanderlyStripePromise) ? (
+                    <Button
+                      size="lg"
+                      onClick={handleConfirm}
+                      disabled={processing}
+                      className="sm:min-w-[200px]"
+                    >
+                      {processing ? (
+                        "Processing..."
+                      ) : (
+                        <>
+                          <Lock className="h-4 w-4" />
+                          {type === "trip" && paymentMode === "partial"
+                            ? `Pay deposit ${formatHotelPrice(amountDueNow)}`
+                            : `Confirm and pay ${formatHotelPrice(total)}`}
+                        </>
+                      )}
+                    </Button>
+                  ) : (
+                    <p className="text-xs text-muted-foreground sm:text-right sm:max-w-xs self-center">
+                      Use the Pay button above to complete your card payment.
+                    </p>
+                  )}
                 </div>
               </div>
             )}

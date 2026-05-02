@@ -2,10 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import { Search, Send, MessageCircle, Phone, MoreHorizontal } from "lucide-react";
+import { Search, Send, MessageCircle, Phone, MoreHorizontal, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useConversations } from "@/hooks/use-conversations";
+import {
+  useTravelerMessagesApi,
+  type TravelerInboxApi,
+} from "@/hooks/use-traveler-messages-api";
+import { usePackPallyAuth } from "@/components/providers/session-provider";
 import { formatRelativeTime, formatTime, formatDay } from "@/lib/format-time";
 import { CURRENT_USER, CURRENT_PARTNER } from "@/data/conversations";
 import type { Message } from "@/types/messaging";
@@ -22,16 +27,45 @@ function groupByDay(msgs: Message[]) {
   return groups;
 }
 
-export function InlineMessages({ side }: { side: "user" | "partner" }) {
-  const {
-    conversations,
-    hydrated,
-    getMessages,
-    sendMessage,
-    markRead,
-  } = useConversations(side);
+export function InlineMessages({
+  side,
+  fullHeight,
+  /** Inbox from parent (e.g. dashboard) to avoid a duplicate `/api/me/messages/inbox` fetch. */
+  sharedTravelerInbox,
+}: {
+  side: "user" | "partner";
+  /** Fill viewport under the site header (e.g. partner /messages). */
+  fullHeight?: boolean;
+  sharedTravelerInbox?: TravelerInboxApi;
+}) {
+  const { user: packUser } = usePackPallyAuth();
+  /** Same Wanderly-backed inbox as the React Native app; hosts use their account id like travelers. */
+  const useLive =
+    (side === "user" || side === "partner") &&
+    Boolean(packUser?.id) &&
+    packUser?.role !== "guest";
 
-  const me = side === "user" ? CURRENT_USER.id : CURRENT_PARTNER.id;
+  const useInternalInbox =
+    useLive && !(side === "user" && sharedTravelerInbox);
+  const local = useConversations(side);
+  const liveInternal = useTravelerMessagesApi(useInternalInbox);
+  const live: TravelerInboxApi =
+    side === "user" && sharedTravelerInbox
+      ? sharedTravelerInbox
+      : liveInternal;
+
+  const conversations = useLive ? live.conversations : local.conversations;
+  const hydrated = useLive ? live.hydrated : local.hydrated;
+  const getMessages = useLive ? live.getMessages : local.getMessages;
+  const sendMessage = useLive ? live.sendMessage : local.sendMessage;
+  const markRead = useLive ? live.markRead : local.markRead;
+  const loadThread = useLive ? live.loadThread : null;
+
+  const me = useLive
+    ? live.meId
+    : side === "user"
+      ? CURRENT_USER.id
+      : CURRENT_PARTNER.id;
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [input, setInput] = useState("");
@@ -44,6 +78,12 @@ export function InlineMessages({ side }: { side: "user" | "partner" }) {
     }
   }, [hydrated, selectedId, conversations]);
 
+  useEffect(() => {
+    if (useLive && loadThread && selectedId) {
+      void loadThread(selectedId);
+    }
+  }, [useLive, loadThread, selectedId]);
+
   const currentConv = useMemo(
     () => conversations.find((c) => c.id === selectedId) || null,
     [conversations, selectedId]
@@ -54,10 +94,17 @@ export function InlineMessages({ side }: { side: "user" | "partner" }) {
   );
   const grouped = useMemo(() => groupByDay(currentMsgs), [currentMsgs]);
   const other = currentConv?.participants.find((p) => p.id !== me);
+  const isGroup = Boolean(currentConv?.isGroup);
+  const displayName = isGroup
+    ? (currentConv?.groupName || "Group")
+    : (other?.name || "");
+  const displayAvatar = isGroup
+    ? (currentConv?.groupImage || other?.avatar || "")
+    : (other?.avatar || "");
 
   useEffect(() => {
     if (selectedId && currentConv && currentConv.unreadCount > 0) {
-      markRead(selectedId);
+      void markRead(selectedId);
     }
   }, [selectedId, currentConv, markRead]);
 
@@ -74,6 +121,7 @@ export function InlineMessages({ side }: { side: "user" | "partner" }) {
     return conversations.filter((c) => {
       const o = c.participants.find((p) => p.id !== me);
       return (
+        c.groupName?.toLowerCase().includes(q) ||
         o?.name.toLowerCase().includes(q) ||
         c.tripTitle?.toLowerCase().includes(q) ||
         c.lastMessage?.toLowerCase().includes(q)
@@ -84,12 +132,19 @@ export function InlineMessages({ side }: { side: "user" | "partner" }) {
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || !selectedId) return;
-    sendMessage(selectedId, input);
+    void sendMessage(selectedId, input);
     setInput("");
   };
 
   return (
-    <div className="flex h-[640px] rounded-2xl border bg-white overflow-hidden">
+    <div
+      className={cn(
+        "flex w-full min-h-0 overflow-hidden bg-white",
+        fullHeight
+          ? "h-[calc(100vh-4rem)] border-y border-b"
+          : "h-[640px] rounded-2xl border"
+      )}
+    >
       {/* Sidebar */}
       <aside className="w-72 shrink-0 border-r flex flex-col">
         <div className="px-4 py-3 border-b">
@@ -108,6 +163,10 @@ export function InlineMessages({ side }: { side: "user" | "partner" }) {
             <div className="p-6 text-center text-sm text-muted-foreground">
               Loading...
             </div>
+          ) : useLive && live.error ? (
+            <div className="p-4 text-center text-xs text-muted-foreground">
+              {live.error}
+            </div>
           ) : filteredConvs.length === 0 ? (
             <div className="py-10 text-center">
               <MessageCircle className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
@@ -117,7 +176,14 @@ export function InlineMessages({ side }: { side: "user" | "partner" }) {
             <div className="divide-y">
               {filteredConvs.map((c) => {
                 const o = c.participants.find((p) => p.id !== me);
-                if (!o) return null;
+                const cIsGroup = Boolean(c.isGroup);
+                if (!cIsGroup && !o) return null;
+                const title = cIsGroup
+                  ? (c.groupName || "Group")
+                  : o!.name;
+                const av = cIsGroup
+                  ? (c.groupImage || o?.avatar)
+                  : o!.avatar;
                 const active = c.id === selectedId;
                 return (
                   <button
@@ -131,15 +197,32 @@ export function InlineMessages({ side }: { side: "user" | "partner" }) {
                     )}
                   >
                     <div className="relative shrink-0">
+                      {cIsGroup && c.groupImage ? (
+                        <div className="relative h-9 w-9">
+                          <Image
+                            src={av || "https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png"}
+                            alt={title}
+                            width={36}
+                            height={36}
+                            className="rounded-xl object-cover h-9 w-9"
+                          />
+                          <span className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-white border-2 border-white">
+                            <Users className="h-2 w-2" />
+                          </span>
+                        </div>
+                      ) : (
+                        <>
                       <Image
-                        src={o.avatar}
-                        alt={o.name}
+                        src={av || "https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png"}
+                        alt={title}
                         width={36}
                         height={36}
                         className="rounded-full object-cover h-9 w-9"
                       />
-                      {o.online && (
+                      {o?.online && (
                         <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500" />
+                      )}
+                        </>
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -150,7 +233,7 @@ export function InlineMessages({ side }: { side: "user" | "partner" }) {
                             c.unreadCount > 0 ? "font-bold" : "font-semibold"
                           )}
                         >
-                          {o.name}
+                          {title}
                         </p>
                         <span className="text-[10px] text-muted-foreground shrink-0">
                           {formatRelativeTime(c.lastMessageAt)}
@@ -189,34 +272,39 @@ export function InlineMessages({ side }: { side: "user" | "partner" }) {
 
       {/* Chat */}
       <section className="flex-1 flex flex-col bg-muted/10 min-w-0">
-        {currentConv && other ? (
+        {currentConv && (isGroup || other) ? (
           <>
             <header className="flex items-center gap-3 border-b bg-white px-4 py-2.5">
               <div className="relative shrink-0">
                 <Image
-                  src={other.avatar}
-                  alt={other.name}
+                  src={
+                    displayAvatar ||
+                    "https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png"
+                  }
+                  alt={displayName}
                   width={36}
                   height={36}
-                  className="rounded-full object-cover h-9 w-9"
+                  className={
+                    isGroup
+                      ? "rounded-xl object-cover h-9 w-9"
+                      : "rounded-full object-cover h-9 w-9"
+                  }
                 />
-                {other.online && (
+                {!isGroup && other?.online && (
                   <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500" />
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-bold text-sm truncate">{other.name}</p>
+                <p className="font-bold text-sm truncate">{displayName}</p>
                 <p className="text-[11px] text-muted-foreground truncate">
-                  {other.online ? "Active now" : "Offline"}
+                  {isGroup
+                    ? `Group · ${currentConv.participants.length} people`
+                    : other?.online
+                      ? "Active now"
+                      : "Offline"}
                   {currentConv.tripTitle && ` · ${currentConv.tripTitle}`}
                 </p>
               </div>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
-                <Phone className="h-3.5 w-3.5" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
-                <MoreHorizontal className="h-3.5 w-3.5" />
-              </Button>
             </header>
 
             <div
@@ -245,9 +333,9 @@ export function InlineMessages({ side }: { side: "user" | "partner" }) {
                         >
                           {!mine && (
                             <div className="h-6 w-6 shrink-0">
-                              {isLast && (
+                              {isLast && displayAvatar && (
                                 <Image
-                                  src={other.avatar}
+                                  src={displayAvatar}
                                   alt=""
                                   width={24}
                                   height={24}
@@ -296,7 +384,11 @@ export function InlineMessages({ side }: { side: "user" | "partner" }) {
                 <Input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder={`Message ${other.name.split(" ")[0]}...`}
+                  placeholder={
+                    isGroup
+                      ? "Message the group…"
+                      : `Message ${displayName.split(" ")[0]}...`
+                  }
                   className="h-10 rounded-full bg-muted/50 border-0 px-4"
                 />
                 <Button

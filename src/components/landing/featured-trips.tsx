@@ -1,15 +1,37 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Container } from "@/components/shared/container";
 import { ScrollReveal } from "@/components/shared/scroll-reveal";
 import { TripCard } from "@/components/trips/trip-card";
-import { trips } from "@/data/trips";
+import { trips as seedTrips } from "@/data/trips";
+import type { Trip } from "@/types";
 
 export function FeaturedTrips() {
-  const featured = trips.filter((t) => t.status !== "sold-out").slice(0, 8);
+  const [list, setList] = useState<Trip[]>(seedTrips);
+
+  useEffect(() => {
+    let c = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/trips?limit=24");
+        const d = await r.json();
+        if (!c && Array.isArray(d.trips) && d.trips.length > 0) {
+          setList(d.trips);
+        }
+      } catch {
+        /* seed */
+      }
+    })();
+    return () => {
+      c = true;
+    };
+  }, []);
+
+  const featured = list.filter((t) => t.status !== "sold-out").slice(0, 8);
 
   return (
     <section className="bg-white py-20 lg:py-28">

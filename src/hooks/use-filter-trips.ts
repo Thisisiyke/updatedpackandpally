@@ -1,14 +1,51 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { trips } from "@/data/trips";
+import { useState, useMemo, useEffect } from "react";
 import { Trip } from "@/types";
 
 export function useFilterTrips() {
+  const [sourceTrips, setSourceTrips] = useState<Trip[]>([]);
+  const [tripsLoading, setTripsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setTripsLoading(true);
+      setLoadError(null);
+      try {
+        const r = await fetch("/api/trips?limit=80");
+        const d = (await r.json().catch(() => ({}))) as {
+          trips?: Trip[];
+          error?: string;
+        };
+        if (cancelled) return;
+        if (!r.ok) {
+          setSourceTrips([]);
+          setLoadError(
+            typeof d.error === "string" ? d.error : "Failed to load trips"
+          );
+          return;
+        }
+        setSourceTrips(Array.isArray(d.trips) ? d.trips : []);
+      } catch {
+        if (!cancelled) {
+          setSourceTrips([]);
+          setLoadError("Could not load trips");
+        }
+      } finally {
+        if (!cancelled) setTripsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const [search, setSearch] = useState("");
   const [continent, setContinent] = useState("All");
   const [difficulty, setDifficulty] = useState("All");
-  const [priceRange, setPriceRange] = useState(0); // index into priceRanges
+  const [priceRange, setPriceRange] = useState(0);
   const [sortBy, setSortBy] = useState("recommended");
 
   const priceRanges = [
@@ -20,9 +57,8 @@ export function useFilterTrips() {
   ];
 
   const filtered = useMemo(() => {
-    let result = [...trips];
+    let result = [...sourceTrips];
 
-    // Search
     if (search) {
       const q = search.toLowerCase();
       result = result.filter(
@@ -34,25 +70,19 @@ export function useFilterTrips() {
       );
     }
 
-    // Continent
     if (continent !== "All") {
       result = result.filter((t) => t.continent === continent);
     }
 
-    // Difficulty
     if (difficulty !== "All") {
       result = result.filter((t) => t.difficulty === difficulty);
     }
 
-    // Price
     const range = priceRanges[priceRange];
     if (range) {
-      result = result.filter(
-        (t) => t.price >= range.min && t.price < range.max
-      );
+      result = result.filter((t) => t.price >= range.min && t.price < range.max);
     }
 
-    // Sort
     switch (sortBy) {
       case "price-asc":
         result.sort((a, b) => a.price - b.price);
@@ -69,7 +99,7 @@ export function useFilterTrips() {
     }
 
     return result;
-  }, [search, continent, difficulty, priceRange, sortBy]);
+  }, [search, continent, difficulty, priceRange, sortBy, sourceTrips]);
 
   const clearFilters = () => {
     setSearch("");
@@ -100,5 +130,7 @@ export function useFilterTrips() {
     clearFilters,
     hasActiveFilters,
     priceRanges,
+    tripsLoading,
+    loadError,
   };
 }

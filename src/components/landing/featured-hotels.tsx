@@ -7,7 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Container } from "@/components/shared/container";
 import { ScrollReveal } from "@/components/shared/scroll-reveal";
 import { FeaturedHotelCard } from "@/components/hotels/featured-hotel-card";
-import { generateHotels } from "@/lib/hotel-generator";
+import {
+  generateHotels,
+  getMarketingHotelStayDates,
+} from "@/lib/hotel-generator";
 
 // A curated mix of destinations for the featured row
 const FEATURED_LOCATIONS = [
@@ -23,12 +26,7 @@ const FEATURED_LOCATIONS = [
 
 export function FeaturedHotels() {
   const featured = useMemo(() => {
-    const checkIn = new Date(Date.now() + 7 * 86400000)
-      .toISOString()
-      .split("T")[0];
-    const checkOut = new Date(Date.now() + 10 * 86400000)
-      .toISOString()
-      .split("T")[0];
+    const { checkIn, checkOut } = getMarketingHotelStayDates();
 
     // Pick one top-rated hotel from each location for variety
     return FEATURED_LOCATIONS.map((location) => {

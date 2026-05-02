@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import {
   Plus,
   Search,
@@ -12,9 +13,12 @@ import {
   Pencil,
   Eye,
   Pause,
+  Play,
   Copy,
   Trash2,
   Building2,
+  Loader2,
+  CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,15 +30,28 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { partnerListings } from "@/data/partner-listings";
+import type { PartnerListing } from "@/data/partner-listings";
+import {
+  deletePartnerListing,
+  duplicatePartnerListingFromRaw,
+  fetchPartnerListingRecord,
+  fetchPartnerListingsList,
+  patchPartnerListingStatus,
+} from "@/lib/partner-listings-client";
+import { hostNeedsStripeConnect } from "@/lib/host-needs-stripe-connect";
+import { usePackPallyAuth } from "@/components/providers/session-provider";
 import { cn } from "@/lib/utils";
 
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(amount);
+function formatMoney(amount: number, currency: string) {
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency || "USD",
+      maximumFractionDigits: 0,
+    }).format(amount);
+  } catch {
+    return `$${amount}`;
+  }
 }
 
 function getStatusConfig(status: string) {
@@ -60,8 +77,32 @@ function getStatusConfig(status: string) {
 }
 
 export default function PartnerListingsPage() {
+  const router = useRouter();
+  const { user } = usePackPallyAuth();
+  const needsStripe = hostNeedsStripeConnect(user);
+  const [partnerListings, setPartnerListings] = useState<PartnerListing[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const { listings } = await fetchPartnerListingsList({ limit: 50 });
+      setPartnerListings(listings);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load listings");
+      setPartnerListings([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const filtered = partnerListings.filter((l) => {
     if (statusFilter !== "all" && l.status !== statusFilter) return false;
@@ -81,9 +122,57 @@ export default function PartnerListingsPage() {
     paused: partnerListings.filter((l) => l.status === "paused").length,
   };
 
+  async function handleDuplicate(listing: PartnerListing) {
+    setBusyId(listing.id);
+    setError(null);
+    try {
+      const raw = await fetchPartnerListingRecord(listing.id);
+      const created = await duplicatePartnerListingFromRaw(raw);
+      await load();
+      router.push(`/partner/listings/${created.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Duplicate failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handlePauseToggle(listing: PartnerListing) {
+    setBusyId(listing.id);
+    setError(null);
+    try {
+      const next =
+        listing.status === "paused" ? "published" : "paused";
+      await patchPartnerListingStatus(listing.id, next);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not update status");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleDelete(listing: PartnerListing) {
+    if (
+      !window.confirm(
+        `Delete “${listing.name}”? This cannot be undone.`
+      )
+    )
+      return;
+    setBusyId(listing.id);
+    setError(null);
+    try {
+      await deletePartnerListing(listing.id);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <div className="p-6 lg:p-10">
-      {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
@@ -93,15 +182,33 @@ export default function PartnerListingsPage() {
             Manage your properties and rooms
           </p>
         </div>
-        <Button asChild className="gap-1.5 shrink-0">
-          <Link href="/partner/listings/new">
-            <Plus className="h-4 w-4" />
-            Add Listing
-          </Link>
-        </Button>
+        {needsStripe ? (
+          <Button
+            asChild
+            variant="outline"
+            className="gap-1.5 shrink-0 border-amber-400 bg-amber-50 text-amber-950 hover:bg-amber-100"
+          >
+            <Link href="/partner/onboarding/stripe">
+              <CreditCard className="h-4 w-4" />
+              Connect Stripe to add listings
+            </Link>
+          </Button>
+        ) : (
+          <Button asChild className="gap-1.5 shrink-0">
+            <Link href="/partner/listings/new">
+              <Plus className="h-4 w-4" />
+              Add Listing
+            </Link>
+          </Button>
+        )}
       </div>
 
-      {/* Filters */}
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+          {error}
+        </div>
+      )}
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center mb-6">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -122,6 +229,7 @@ export default function PartnerListingsPage() {
           ].map((tab) => (
             <button
               key={tab.value}
+              type="button"
               onClick={() => setStatusFilter(tab.value)}
               className={cn(
                 "whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
@@ -136,22 +244,30 @@ export default function PartnerListingsPage() {
         </div>
       </div>
 
-      {/* Listings */}
-      {filtered.length > 0 ? (
+      {loading ? (
+        <div className="flex justify-center py-20 text-muted-foreground gap-2">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          Loading listings…
+        </div>
+      ) : filtered.length > 0 ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filtered.map((listing) => {
             const statusConfig = getStatusConfig(listing.status);
+            const working = busyId === listing.id;
+            const pauseLabel =
+              listing.status === "paused" ? "Resume" : "Pause";
+
             return (
               <div
                 key={listing.id}
                 className="group rounded-2xl border bg-white overflow-hidden transition-all hover:shadow-md"
               >
-                {/* Image */}
                 <div className="relative aspect-[16/10] overflow-hidden">
                   <Image
                     src={listing.coverImage}
                     alt={listing.name}
                     fill
+                    unoptimized
                     className="object-cover transition-transform duration-500 group-hover:scale-105"
                     sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw"
                   />
@@ -162,31 +278,56 @@ export default function PartnerListingsPage() {
                   </Badge>
                   <DropdownMenu>
                     <DropdownMenuTrigger
-                      render={
-                        <button className="absolute top-3 right-3 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 backdrop-blur-sm transition-colors hover:bg-white" />
-                      }
+                      disabled={working}
+                      className="absolute top-3 right-3 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 backdrop-blur-sm transition-colors hover:bg-white outline-none"
                     >
-                      <MoreVertical className="h-4 w-4" />
+                      {working ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <MoreVertical className="h-4 w-4" />
+                      )}
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-40">
-                      <DropdownMenuItem>
+                    <DropdownMenuContent align="end" className="w-44">
+                      <DropdownMenuItem
+                        onClick={() =>
+                          router.push(`/partner/listings/${listing.id}`)
+                        }
+                      >
                         <Pencil className="h-4 w-4" />
                         Edit
                       </DropdownMenuItem>
-                      <DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() =>
+                          router.push(`/partner/listings/${listing.id}`)
+                        }
+                      >
                         <Eye className="h-4 w-4" />
                         Preview
                       </DropdownMenuItem>
-                      <DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={working}
+                        onClick={() => void handleDuplicate(listing)}
+                      >
                         <Copy className="h-4 w-4" />
                         Duplicate
                       </DropdownMenuItem>
-                      <DropdownMenuItem>
-                        <Pause className="h-4 w-4" />
-                        Pause
+                      <DropdownMenuItem
+                        disabled={working || listing.status === "draft"}
+                        onClick={() => void handlePauseToggle(listing)}
+                      >
+                        {listing.status === "paused" ? (
+                          <Play className="h-4 w-4" />
+                        ) : (
+                          <Pause className="h-4 w-4" />
+                        )}
+                        {pauseLabel}
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem variant="destructive">
+                      <DropdownMenuItem
+                        variant="destructive"
+                        disabled={working}
+                        onClick={() => void handleDelete(listing)}
+                      >
                         <Trash2 className="h-4 w-4" />
                         Delete
                       </DropdownMenuItem>
@@ -194,7 +335,6 @@ export default function PartnerListingsPage() {
                   </DropdownMenu>
                 </div>
 
-                {/* Content */}
                 <div className="p-4">
                   <div className="flex items-center gap-1 mb-1">
                     {Array.from({ length: listing.starRating }).map((_, i) => (
@@ -212,7 +352,6 @@ export default function PartnerListingsPage() {
                     {listing.city}, {listing.country}
                   </p>
 
-                  {/* Stats row */}
                   <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
                     <div>
                       <p className="text-muted-foreground">Occupancy</p>
@@ -235,14 +374,13 @@ export default function PartnerListingsPage() {
                     </div>
                   </div>
 
-                  {/* Bottom */}
                   <div className="mt-4 flex items-center justify-between pt-3 border-t">
                     <div>
                       <p className="text-xs text-muted-foreground">
                         Base price
                       </p>
                       <p className="font-bold">
-                        {formatCurrency(listing.pricePerNight)}
+                        {formatMoney(listing.pricePerNight, listing.currency)}
                         <span className="text-xs font-normal text-muted-foreground">
                           /night
                         </span>
@@ -270,12 +408,25 @@ export default function PartnerListingsPage() {
               ? "Try adjusting your search or filters"
               : "Start by adding your first property"}
           </p>
-          <Button asChild className="gap-1.5">
-            <Link href="/partner/listings/new">
-              <Plus className="h-4 w-4" />
-              Add Listing
-            </Link>
-          </Button>
+          {needsStripe ? (
+            <Button
+              asChild
+              variant="outline"
+              className="gap-1.5 border-amber-400 bg-amber-50 text-amber-950 hover:bg-amber-100"
+            >
+              <Link href="/partner/onboarding/stripe">
+                <CreditCard className="h-4 w-4" />
+                Connect Stripe first
+              </Link>
+            </Button>
+          ) : (
+            <Button asChild className="gap-1.5">
+              <Link href="/partner/listings/new">
+                <Plus className="h-4 w-4" />
+                Add Listing
+              </Link>
+            </Button>
+          )}
         </div>
       )}
     </div>

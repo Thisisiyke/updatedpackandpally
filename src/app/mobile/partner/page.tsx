@@ -10,7 +10,6 @@ import {
   Calendar,
   Star,
   DollarSign,
-  MessageCircle,
   ChevronRight,
   Compass,
   Bell,
@@ -19,17 +18,21 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MobileHeader } from "@/components/mobile/mobile-header";
 import { PartnerBottomTabs } from "@/components/mobile/partner-bottom-tabs";
-import { partnerTrips } from "@/data/partner-trips";
 import {
   getUserPartnerTrips,
   subscribeToUserPartnerTrips,
 } from "@/lib/user-partner-trips";
+import { usePackPallyAuth } from "@/components/providers/session-provider";
+import { wanderlyHostTripToPartnerTrip } from "@/lib/wanderly-partner-map";
+import type { WanderlyTripRecord } from "@/lib/wanderly-trip-adapter";
+import type { PartnerTrip } from "@/data/partner-trips";
 import {
   countUnreadBookings,
   subscribeToPartnerNotifications,
 } from "@/lib/partner-notifications";
 import { CURRENT_PARTNER } from "@/data/conversations";
 import { cn } from "@/lib/utils";
+import type { PartnerOverviewPayload } from "@/lib/partner-overview-types";
 
 function formatMoney(n: number) {
   return new Intl.NumberFormat("en-US", {
@@ -40,8 +43,11 @@ function formatMoney(n: number) {
 }
 
 export default function MobilePartnerDashboard() {
+  const { user } = usePackPallyAuth();
   const [userTrips, setUserTrips] = useState(getUserPartnerTrips());
+  const [apiTrips, setApiTrips] = useState<PartnerTrip[]>([]);
   const [unread, setUnread] = useState(0);
+  const [overview, setOverview] = useState<PartnerOverviewPayload | null>(null);
 
   useEffect(() => {
     setUserTrips(getUserPartnerTrips());
@@ -58,22 +64,80 @@ export default function MobilePartnerDashboard() {
     };
   }, []);
 
-  // Merge user-created trips with seed partner trips (user ones first)
+  useEffect(() => {
+    if (!user?.id) {
+      setApiTrips([]);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/partner/trips?userId=${encodeURIComponent(user.id)}&limit=50`)
+      .then((r) => r.json())
+      .then((d: { items?: WanderlyTripRecord[] }) => {
+        if (cancelled || !Array.isArray(d.items)) return;
+        setApiTrips(d.items.map((row) => wanderlyHostTripToPartnerTrip(row)));
+      })
+      .catch(() => {
+        if (!cancelled) setApiTrips([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setOverview(null);
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/partner/overview", { credentials: "include" })
+      .then((r) => r.json())
+      .then((d: PartnerOverviewPayload) => {
+        if (!cancelled && d.status === "success") setOverview(d);
+      })
+      .catch(() => {
+        if (!cancelled) setOverview(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  /** API trips plus local-only drafts from the create wizard (not in Wanderly). */
   const allTrips = useMemo(() => {
-    const userIds = new Set(userTrips.map((t) => t.id));
-    const seed = partnerTrips.filter((t) => !userIds.has(t.id));
-    return [...userTrips, ...seed];
-  }, [userTrips]);
+    const fromApi = apiTrips;
+    const idSet = new Set(fromApi.map((t) => t.id));
+    const localOnly = userTrips.filter((t) => !idSet.has(t.id));
+    return [...fromApi, ...localOnly];
+  }, [apiTrips, userTrips]);
 
   const stats = useMemo(() => {
+    if (overview?.status === "success") {
+      return {
+        activeTrips: overview.activeTripCount ?? 0,
+        totalBookings: overview.confirmedBookingsCount ?? 0,
+        revenue: overview.totalCollected ?? 0,
+      };
+    }
     const published = allTrips.filter((t) => t.status === "published").length;
     const totalBookings = allTrips.reduce(
       (sum, t) => sum + t.currentBookings,
       0
     );
     const revenue = allTrips.reduce((sum, t) => sum + (t.revenue || 0), 0);
-    return { published, totalBookings, revenue };
-  }, [allTrips]);
+    return {
+      activeTrips: published,
+      totalBookings,
+      revenue,
+    };
+  }, [allTrips, overview]);
+
+  const displayName =
+    user?.name?.trim() ||
+    (user?.email ? user.email.split("@")[0] : null) ||
+    CURRENT_PARTNER.name;
+  const avatarSrc =
+    user?.image && user.image.length > 0 ? user.image : CURRENT_PARTNER.avatar;
 
   return (
     <div className="relative flex flex-col h-full min-h-[844px] bg-muted/20">
@@ -102,8 +166,8 @@ export default function MobilePartnerDashboard() {
           <div className="flex items-center gap-3">
             <div className="relative h-12 w-12 overflow-hidden rounded-full">
               <Image
-                src={CURRENT_PARTNER.avatar}
-                alt={CURRENT_PARTNER.name}
+                src={avatarSrc}
+                alt={displayName}
                 fill
                 sizes="48px"
                 className="object-cover"
@@ -113,14 +177,21 @@ export default function MobilePartnerDashboard() {
               <p className="text-[11px] text-muted-foreground">
                 Hi there, host
               </p>
-              <p className="font-bold text-base truncate">
-                {CURRENT_PARTNER.name}
-              </p>
+              <p className="font-bold text-base truncate">{displayName}</p>
             </div>
-            <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 gap-1 shrink-0">
-              <Sparkles className="h-3 w-3" />
-              Stripe ready
-            </Badge>
+            {user?.stripeId ? (
+              <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 gap-1 shrink-0">
+                <Sparkles className="h-3 w-3" />
+                Stripe ready
+              </Badge>
+            ) : (
+              <Badge
+                variant="outline"
+                className="text-muted-foreground gap-1 shrink-0 text-[10px]"
+              >
+                Connect Stripe
+              </Badge>
+            )}
           </div>
         </div>
 
@@ -129,8 +200,8 @@ export default function MobilePartnerDashboard() {
           <div className="grid grid-cols-3 gap-2">
             <Stat
               icon={<Compass className="h-3.5 w-3.5 text-primary" />}
-              label="Trips"
-              value={String(stats.published)}
+              label="Active"
+              value={String(stats.activeTrips)}
             />
             <Stat
               icon={<Users className="h-3.5 w-3.5 text-primary" />}
@@ -139,7 +210,7 @@ export default function MobilePartnerDashboard() {
             />
             <Stat
               icon={<DollarSign className="h-3.5 w-3.5 text-primary" />}
-              label="Revenue"
+              label="Collected"
               value={formatMoney(stats.revenue)}
             />
           </div>
@@ -242,11 +313,7 @@ function EmptyState() {
   );
 }
 
-function TripRow({
-  trip,
-}: {
-  trip: (typeof partnerTrips)[number];
-}) {
+function TripRow({ trip }: { trip: PartnerTrip }) {
   const fillPct = trip.maxGroupSize
     ? (trip.currentBookings / trip.maxGroupSize) * 100
     : 0;

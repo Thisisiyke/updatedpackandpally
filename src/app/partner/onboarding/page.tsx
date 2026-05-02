@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Container } from "@/components/shared/container";
+import { PlatformPaymentNotice } from "@/components/shared/platform-payment-notice";
 import { isStripeConnected, safePartnerNext } from "@/lib/partner-stripe";
 
 function OnboardingIntro() {
@@ -54,10 +55,16 @@ function OnboardingIntro() {
               Set up payouts with Stripe
             </h1>
             <p className="mt-4 text-lg text-muted-foreground leading-relaxed">
-              Pack & Pally uses Stripe to securely verify your identity, process
-              payments, and send payouts directly to your bank. Stripe handles all
-              of the documentation — no paperwork from us.
+              Pack &amp; Pally uses Stripe to verify your identity and connect
+              your bank. Travelers pay the{" "}
+              <strong className="text-foreground">platform</strong> first; we
+              then transfer your earnings to this connected account on our payout
+              schedule. Stripe handles compliance documentation.
             </p>
+          </div>
+
+          <div className="mt-8">
+            <PlatformPaymentNotice variant="host-inline" />
           </div>
 
           <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -74,9 +81,11 @@ function OnboardingIntro() {
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
                 <Banknote className="h-5 w-5 text-primary" />
               </div>
-              <h3 className="mt-4 font-bold">Fast, direct payouts</h3>
+              <h3 className="mt-4 font-bold">Payouts from the platform</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                Get paid to your bank within 48 hours of each trip ending.
+                We transfer your share from Pack &amp; Pally&apos;s Stripe
+                account to your connected bank—often within about 48 hours after
+                a trip ends, per policy.
               </p>
             </div>
             <div className="rounded-2xl border bg-card p-5">

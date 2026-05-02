@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { Loader2 } from "lucide-react";
@@ -9,12 +9,36 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { login } from "@/lib/actions/auth";
+import { usePackPallyAuth } from "@/components/providers/session-provider";
+import { WebSocialAuthRows } from "@/components/auth/web-social-auth";
 
-export default function LoginPage() {
+function safeNextPath(next: string | null): string {
+  if (!next || !next.startsWith("/") || next.startsWith("//")) return "/dashboard";
+  if (next.startsWith("/login")) return "/dashboard";
+  return next;
+}
+
+async function readJson(res: Response): Promise<{ error?: string } & Record<string, unknown>> {
+  try {
+    return (await res.json()) as { error?: string } & Record<string, unknown>;
+  } catch {
+    return { error: `Request failed (${res.status})` };
+  }
+}
+
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const { refresh } = usePackPallyAuth();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  async function completeSignIn() {
+    await refresh();
+    const dest = safeNextPath(searchParams.get("next"));
+    router.push(dest);
+    router.refresh();
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -22,23 +46,33 @@ export default function LoginPage() {
     setLoading(true);
 
     const formData = new FormData(e.currentTarget);
-    const result = await login(formData);
+    const email = String(formData.get("email") || "");
+    const password = String(formData.get("password") || "");
 
-    if (result.error) {
-      setError(result.error);
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await readJson(res);
+      if (!res.ok) {
+        setError(typeof data.error === "string" ? data.error : "Login failed");
+        return;
+      }
+      await completeSignIn();
+    } catch {
+      setError("Something went wrong. Try again.");
+    } finally {
       setLoading(false);
-      return;
     }
-
-    router.push("/dashboard");
-    router.refresh();
   }
 
   return (
     <div className="flex min-h-[calc(100vh-8rem)] items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
         <div className="rounded-2xl border bg-card p-8 shadow-sm">
-          {/* Logo */}
           <div className="flex justify-center mb-6">
             <Link href="/" className="flex items-center gap-2">
               <Image
@@ -48,9 +82,7 @@ export default function LoginPage() {
                 height={36}
                 className="h-9 w-9 object-contain"
               />
-              <span className="text-xl font-bold font-heading">
-                Pack & Pally
-              </span>
+              <span className="text-xl font-bold font-heading">Pack & Pally</span>
             </Link>
           </div>
 
@@ -73,16 +105,16 @@ export default function LoginPage() {
                 name="email"
                 type="email"
                 placeholder="you@example.com"
+                autoComplete="email"
                 required
+                disabled={loading}
+                className="h-11"
               />
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label htmlFor="password">Password</Label>
-                <Link
-                  href="#"
-                  className="text-xs text-primary hover:underline"
-                >
+                <Link href="#" className="text-xs text-primary hover:underline">
                   Forgot password?
                 </Link>
               </div>
@@ -91,15 +123,13 @@ export default function LoginPage() {
                 name="password"
                 type="password"
                 placeholder="Enter your password"
+                autoComplete="current-password"
                 required
+                disabled={loading}
+                className="h-11"
               />
             </div>
-            <Button
-              className="w-full h-11"
-              size="lg"
-              type="submit"
-              disabled={loading}
-            >
+            <Button className="w-full h-11 gap-2" size="lg" type="submit" disabled={loading}>
               {loading ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -118,26 +148,35 @@ export default function LoginPage() {
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Button variant="outline" className="h-11">
-              Google
-            </Button>
-            <Button variant="outline" className="h-11">
-              Apple
-            </Button>
-          </div>
+          <WebSocialAuthRows
+            disabled={loading}
+            onError={setError}
+            onSignedIn={completeSignIn}
+          />
 
           <p className="mt-8 text-center text-sm text-muted-foreground">
             Don&apos;t have an account?{" "}
-            <Link
-              href="/signup"
-              className="font-medium text-primary hover:underline"
-            >
+            <Link href="/signup" className="font-medium text-primary hover:underline">
               Sign Up
             </Link>
           </p>
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[calc(100vh-8rem)] items-center justify-center text-muted-foreground text-sm gap-2">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading…
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }

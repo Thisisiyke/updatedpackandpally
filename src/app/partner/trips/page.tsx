@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
   Plus,
@@ -17,6 +18,7 @@ import {
   Star,
   MapPin,
   DollarSign,
+  CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,8 +31,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { partnerTrips } from "@/data/partner-trips";
+import type { PartnerTrip } from "@/data/partner-trips";
 import { cn } from "@/lib/utils";
+import { usePackPallyAuth } from "@/components/providers/session-provider";
+import { wanderlyHostTripToPartnerTrip } from "@/lib/wanderly-partner-map";
+import type { WanderlyTripRecord } from "@/lib/wanderly-trip-adapter";
+import { deletePartnerTrip } from "@/lib/partner-delete-trip";
+import { hostNeedsStripeConnect } from "@/lib/host-needs-stripe-connect";
 
 function formatCurrency(amount: number) {
   return new Intl.NumberFormat("en-US", {
@@ -63,10 +70,66 @@ function getStatusConfig(status: string) {
 }
 
 export default function PartnerTripsPage() {
+  const router = useRouter();
+  const { user } = usePackPallyAuth();
+  const [remoteTrips, setRemoteTrips] = useState<PartnerTrip[]>([]);
+  const [tripsLoading, setTripsLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  const filtered = partnerTrips.filter((t) => {
+  const handleDeleteTrip = (trip: PartnerTrip) => {
+    if (
+      !window.confirm(
+        `Delete “${trip.title}”? This cannot be undone. Stored images for this trip will be removed.`
+      )
+    ) {
+      return;
+    }
+    setDeletingId(trip.id);
+    void (async () => {
+      const r = await deletePartnerTrip(trip.id);
+      setDeletingId(null);
+      if (!r.ok) {
+        window.alert(r.error);
+        return;
+      }
+      setRemoteTrips((prev) => prev.filter((t) => t.id !== trip.id));
+    })();
+  };
+
+  useEffect(() => {
+    if (!user?.id) {
+      setRemoteTrips([]);
+      setTripsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setTripsLoading(true);
+    fetch(`/api/partner/trips?userId=${encodeURIComponent(user.id)}&limit=50`)
+      .then((r) => r.json())
+      .then((d: { items?: WanderlyTripRecord[] }) => {
+        if (cancelled) return;
+        if (Array.isArray(d.items)) {
+          setRemoteTrips(d.items.map((row) => wanderlyHostTripToPartnerTrip(row)));
+        } else {
+          setRemoteTrips([]);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRemoteTrips([]);
+      })
+      .finally(() => {
+        if (!cancelled) setTripsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  const tripSource = remoteTrips;
+
+  const filtered = tripSource.filter((t) => {
     if (statusFilter !== "all" && t.status !== statusFilter) return false;
     if (
       search &&
@@ -78,14 +141,26 @@ export default function PartnerTripsPage() {
   });
 
   const counts = {
-    all: partnerTrips.length,
-    published: partnerTrips.filter((t) => t.status === "published").length,
-    draft: partnerTrips.filter((t) => t.status === "draft").length,
-    "sold-out": partnerTrips.filter((t) => t.status === "sold-out").length,
+    all: tripSource.length,
+    published: tripSource.filter((t) => t.status === "published").length,
+    draft: tripSource.filter((t) => t.status === "draft").length,
+    "sold-out": tripSource.filter((t) => t.status === "sold-out").length,
   };
 
-  const totalRevenue = partnerTrips.reduce((s, t) => s + t.revenue, 0);
-  const totalBookings = partnerTrips.reduce((s, t) => s + t.currentBookings, 0);
+  const totalRevenue = tripSource.reduce((s, t) => s + t.revenue, 0);
+  const totalBookings = tripSource.reduce((s, t) => s + t.currentBookings, 0);
+
+  const needsStripe = hostNeedsStripeConnect(user);
+
+  if (tripsLoading) {
+    return (
+      <div className="p-6 lg:p-10">
+        <p className="text-sm text-muted-foreground py-20 text-center">
+          Loading your group trips…
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 lg:p-10">
@@ -99,19 +174,32 @@ export default function PartnerTripsPage() {
             Create and manage curated group adventures
           </p>
         </div>
-        <Button asChild className="gap-1.5 shrink-0">
-          <Link href="/partner/trips/new">
-            <Plus className="h-4 w-4" />
-            Create Trip
-          </Link>
-        </Button>
+        {needsStripe ? (
+          <Button
+            asChild
+            variant="outline"
+            className="gap-1.5 shrink-0 border-amber-400 bg-amber-50 text-amber-950 hover:bg-amber-100"
+          >
+            <Link href="/partner/onboarding/stripe">
+              <CreditCard className="h-4 w-4" />
+              Connect Stripe to create trips
+            </Link>
+          </Button>
+        ) : (
+          <Button asChild className="gap-1.5 shrink-0">
+            <Link href="/partner/trips/new">
+              <Plus className="h-4 w-4" />
+              Create Trip
+            </Link>
+          </Button>
+        )}
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-6">
         <div className="rounded-xl border bg-white p-4">
           <p className="text-xs text-muted-foreground">Total trips</p>
-          <p className="text-2xl font-bold">{partnerTrips.length}</p>
+          <p className="text-2xl font-bold">{tripSource.length}</p>
         </div>
         <div className="rounded-xl border bg-white p-4">
           <p className="text-xs text-muted-foreground">Published</p>
@@ -191,30 +279,48 @@ export default function PartnerTripsPage() {
                     {statusConfig.label}
                   </Badge>
                   <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <button className="absolute top-3 right-3 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 backdrop-blur-sm transition-colors hover:bg-white" />
-                      }
-                    >
+                    <DropdownMenuTrigger className="absolute top-3 right-3 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 backdrop-blur-sm transition-colors hover:bg-white outline-none">
                       <MoreVertical className="h-4 w-4" />
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-40">
-                      <DropdownMenuItem>
+                    <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuItem
+                        onClick={() => {
+                          router.push(`/partner/trips/${trip.id}`);
+                        }}
+                      >
                         <Pencil className="h-4 w-4" />
                         Edit
                       </DropdownMenuItem>
-                      <DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => {
+                          window.open(
+                            `/trips/${trip.id}`,
+                            "_blank",
+                            "noopener,noreferrer"
+                          );
+                        }}
+                      >
                         <Eye className="h-4 w-4" />
                         Preview
                       </DropdownMenuItem>
-                      <DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => {
+                          router.push(
+                            `/partner/trips/new?duplicate=${encodeURIComponent(trip.id)}`
+                          );
+                        }}
+                      >
                         <Copy className="h-4 w-4" />
                         Duplicate
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem variant="destructive">
+                      <DropdownMenuItem
+                        variant="destructive"
+                        disabled={deletingId === trip.id}
+                        onClick={() => handleDeleteTrip(trip)}
+                      >
                         <Trash2 className="h-4 w-4" />
-                        Delete
+                        {deletingId === trip.id ? "Deleting…" : "Delete"}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -305,12 +411,25 @@ export default function PartnerTripsPage() {
               ? "Try adjusting your search"
               : "Create your first group adventure"}
           </p>
-          <Button asChild className="gap-1.5">
-            <Link href="/partner/trips/new">
-              <Plus className="h-4 w-4" />
-              Create Trip
-            </Link>
-          </Button>
+          {needsStripe ? (
+            <Button
+              asChild
+              variant="outline"
+              className="gap-1.5 border-amber-400 bg-amber-50 text-amber-950 hover:bg-amber-100"
+            >
+              <Link href="/partner/onboarding/stripe">
+                <CreditCard className="h-4 w-4" />
+                Connect Stripe first
+              </Link>
+            </Button>
+          ) : (
+            <Button asChild className="gap-1.5">
+              <Link href="/partner/trips/new">
+                <Plus className="h-4 w-4" />
+                Create Trip
+              </Link>
+            </Button>
+          )}
         </div>
       )}
     </div>
