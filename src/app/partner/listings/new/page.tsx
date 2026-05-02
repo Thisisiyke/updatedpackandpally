@@ -23,6 +23,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { FEATURE_FLAGS, PROVIDER_NAMES } from "@/lib/constants";
+import { ProviderComingSoon } from "@/components/shared/provider-coming-soon";
 import { cn } from "@/lib/utils";
 import { createPartnerListing } from "@/lib/partner-listings-client";
 import { usePackPallyAuth } from "@/components/providers/session-provider";
@@ -37,6 +39,21 @@ const steps = [
 ];
 
 export default function NewListingPage() {
+  if (!FEATURE_FLAGS.hostPropertyListings) {
+    return (
+      <ProviderComingSoon
+        title="Adding a property — coming soon"
+        description="Once the provider integration is live, you'll connect your existing inventory account to sync rooms, rates, and availability automatically."
+        provider={PROVIDER_NAMES.hotels}
+        ctaHref="/partner/trips/new"
+        ctaLabel="Create a group trip instead"
+      />
+    );
+  }
+  return <NewListingImpl />;
+}
+
+function NewListingImpl() {
   const router = useRouter();
   const { user } = usePackPallyAuth();
   const [step, setStep] = useState(1);

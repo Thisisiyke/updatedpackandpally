@@ -18,15 +18,22 @@ import {
 import { usePackPallyAuth } from "@/components/providers/session-provider";
 import { useTravelerMessagesApi } from "@/hooks/use-traveler-messages-api";
 import { hostNeedsStripeConnect } from "@/lib/host-needs-stripe-connect";
+import { FEATURE_FLAGS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 /** Payouts / Stripe are always the first row (`stripeNav`) so hosts always see Connect or Payouts. */
 const defaultNavItems = [
   { href: "/partner", label: "Overview", icon: LayoutDashboard },
-  { href: "/partner/listings", label: "Listings", icon: Building2 },
+  ...(FEATURE_FLAGS.hostPropertyListings
+    ? [{ href: "/partner/listings", label: "Listings", icon: Building2 }]
+    : []),
   { href: "/partner/trips", label: "Group Trips", icon: Compass },
-  { href: "/partner/calendar", label: "Calendar", icon: Calendar },
-  { href: "/partner/bookings", label: "Bookings", icon: CalendarCheck },
+  ...(FEATURE_FLAGS.hostPropertyListings
+    ? [
+        { href: "/partner/calendar", label: "Calendar", icon: Calendar },
+        { href: "/partner/bookings", label: "Bookings", icon: CalendarCheck },
+      ]
+    : []),
   { href: "/partner/messages", label: "Messages", icon: MessageCircle },
 ];
 
@@ -56,7 +63,7 @@ export function PartnerSidebar() {
   );
 
   return (
-    <aside className="sticky top-16 h-[calc(100vh-4rem)] w-60 shrink-0 border-r bg-white flex flex-col">
+    <aside className="sticky top-14 h-[calc(100vh-3.5rem)] w-60 shrink-0 border-r bg-white flex flex-col">
       <div className="flex-1 overflow-y-auto p-4">
         <div className="mb-6 rounded-lg bg-primary/5 p-3 border border-primary/10">
           <div className="flex items-center gap-2">

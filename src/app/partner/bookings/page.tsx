@@ -17,6 +17,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { FEATURE_FLAGS, PROVIDER_NAMES } from "@/lib/constants";
+import { ProviderComingSoon } from "@/components/shared/provider-coming-soon";
 import { cn } from "@/lib/utils";
 import { usePackPallyAuth } from "@/components/providers/session-provider";
 import {
@@ -64,6 +66,26 @@ function getStatusConfig(status: string) {
 }
 
 export default function PartnerBookingsPage() {
+  if (!FEATURE_FLAGS.hostPropertyListings) {
+    return (
+      <ProviderComingSoon
+        title="Property bookings — coming soon"
+        description="Guest reservations from your connected property provider will land here. For group trip travelers, head to a trip's Travelers tab."
+        provider={PROVIDER_NAMES.hotels}
+        ctaHref="/partner/trips"
+        ctaLabel="Manage group trip travelers"
+        perks={[
+          "Confirmed, pending, and cancelled reservations in one inbox",
+          "Message guests directly from each booking",
+          "Synced check-in / check-out dates and totals",
+        ]}
+      />
+    );
+  }
+  return <PartnerBookingsImpl />;
+}
+
+function PartnerBookingsImpl() {
   const { user } = usePackPallyAuth();
   const [rows, setRows] = useState<PartnerTripBookingRow[]>([]);
   const [loading, setLoading] = useState(true);

@@ -14,6 +14,8 @@ import {
 import type { PartnerListing } from "@/data/partner-listings";
 import { partnerBookings } from "@/data/partner-listings";
 import { fetchPartnerListingsList } from "@/lib/partner-listings-client";
+import { FEATURE_FLAGS, PROVIDER_NAMES } from "@/lib/constants";
+import { ProviderComingSoon } from "@/components/shared/provider-coming-soon";
 import { cn } from "@/lib/utils";
 
 function getDaysInMonth(year: number, month: number) {
@@ -25,6 +27,21 @@ function getFirstDayOfMonth(year: number, month: number) {
 }
 
 export default function PartnerCalendarPage() {
+  if (!FEATURE_FLAGS.hostPropertyListings) {
+    return (
+      <ProviderComingSoon
+        title="Property calendar — coming soon"
+        description="Availability, blocks, and reservations from your connected property provider will show up here. Group trip dates live on each trip's overview."
+        provider={PROVIDER_NAMES.hotels}
+        ctaHref="/partner/trips"
+        ctaLabel="Go to Group Trips"
+      />
+    );
+  }
+  return <PartnerCalendarImpl />;
+}
+
+function PartnerCalendarImpl() {
   const [partnerListings, setPartnerListings] = useState<PartnerListing[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [selectedListingId, setSelectedListingId] = useState("");

@@ -53,6 +53,13 @@ export interface PartnerTrip {
   included: string[];
   notIncluded: string[];
   status: "published" | "draft" | "sold-out";
+  /**
+   * Discovery visibility. Independent of `status`.
+   *  - "public"  → listed in browse / featured / mobile discovery feeds
+   *  - "private" → only reachable via direct share link (not listed)
+   * Defaults to "public" for legacy trips that don't set it.
+   */
+  visibility?: "public" | "private";
   revenue: number;
   createdAt: string;
   rating: number;

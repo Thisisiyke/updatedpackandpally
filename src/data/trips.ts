@@ -30,6 +30,8 @@ export const trips: Trip[] = [
       enabled: true,
       splits: [0.3334, 0.3333, 0.3333],
     },
+    requireTravelerId: true,
+    requestSocialMedia: true,
     maxGroupSize: 12,
     currentBookings: 8,
     difficulty: "Easy",

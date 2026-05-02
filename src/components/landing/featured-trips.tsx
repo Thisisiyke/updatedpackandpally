@@ -8,6 +8,7 @@ import { Container } from "@/components/shared/container";
 import { ScrollReveal } from "@/components/shared/scroll-reveal";
 import { TripCard } from "@/components/trips/trip-card";
 import { trips as seedTrips } from "@/data/trips";
+import { isDiscoverable } from "@/lib/trip-visibility";
 import type { Trip } from "@/types";
 
 export function FeaturedTrips() {
@@ -31,7 +32,9 @@ export function FeaturedTrips() {
     };
   }, []);
 
-  const featured = list.filter((t) => t.status !== "sold-out").slice(0, 8);
+  const featured = list
+    .filter((t) => t.status !== "sold-out" && isDiscoverable(t))
+    .slice(0, 8);
 
   return (
     <section className="bg-white py-20 lg:py-28">

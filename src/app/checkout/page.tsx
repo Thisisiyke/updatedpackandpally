@@ -894,12 +894,22 @@ function CheckoutContent() {
                 )}
 
                 {type === "trip" && (
-                  <div className="mb-6">
-                    <h3 className="font-semibold mb-3 flex items-center gap-1.5">
-                      <Wallet className="h-4 w-4 text-primary" />
-                      Choose how you&apos;d like to pay
-                    </h3>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="mb-6 space-y-4">
+                    <div>
+                      <h3 className="font-semibold flex items-center gap-1.5">
+                        <Wallet className="h-4 w-4 text-primary" />
+                        Want to pay partially?
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {installmentsBlocked
+                          ? "Partial payment isn't available for this trip — pay in full to confirm your spot."
+                          : installmentsAllowed
+                          ? "Split the cost into 3 equal installments scheduled before the trip starts."
+                          : `Place a ${Math.round(DEPOSIT_PERCENT * 100)}% deposit now and pay the rest 30 days before departure.`}
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
                       <button
                         type="button"
                         onClick={() => setPaymentMode("full")}
@@ -911,16 +921,15 @@ function CheckoutContent() {
                         )}
                       >
                         <div className="flex items-center justify-between mb-1">
-                          <span className="font-semibold text-sm">Pay in full</span>
+                          <span className="font-semibold text-sm">
+                            No, pay in full
+                          </span>
                           {paymentMode === "full" && (
                             <Check className="h-4 w-4 text-primary" />
                           )}
                         </div>
-                        <p className="text-xl font-bold">
-                          ${total.toLocaleString()}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          One charge today — you&apos;re all set
+                        <p className="text-xs text-muted-foreground">
+                          ${total.toLocaleString()} charged today
                         </p>
                       </button>
                       {useWanderlyStripe ? (
@@ -950,65 +959,51 @@ function CheckoutContent() {
                           {remainingDueCopy}
                         </p>
                       </button>
-                      ) : installmentsAllowed && installmentSchedule ? (
+                      ) : (
                         <button
                           type="button"
-                          onClick={() => setPaymentMode("partial")}
+                          onClick={() =>
+                            !installmentsBlocked && setPaymentMode("partial")
+                          }
+                          disabled={installmentsBlocked}
                           className={cn(
                             "rounded-xl border p-4 text-left transition-all",
-                            paymentMode === "partial"
+                            installmentsBlocked
+                              ? "opacity-50 cursor-not-allowed border-muted"
+                              : paymentMode === "partial"
                               ? "border-primary bg-primary/5 ring-2 ring-primary/20"
                               : "border-muted hover:border-primary/40"
                           )}
                         >
                           <div className="flex items-center justify-between mb-1">
                             <span className="font-semibold text-sm">
-                              3 installments
+                              Yes, split it
                             </span>
-                            {paymentMode === "partial" && (
-                              <Check className="h-4 w-4 text-primary" />
-                            )}
+                            {paymentMode === "partial" &&
+                              !installmentsBlocked && (
+                                <Check className="h-4 w-4 text-primary" />
+                              )}
                           </div>
-                          <p className="text-xl font-bold">
-                            ${installmentSchedule[0].amount.toLocaleString()}{" "}
-                            today
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Split into 3 equal payments — full schedule below
+                          <p className="text-xs text-muted-foreground">
+                            {installmentsAllowed && installmentSchedule
+                              ? "3 installments"
+                              : `${Math.round(DEPOSIT_PERCENT * 100)}% deposit`}
                           </p>
                         </button>
-                      ) : !installmentsBlocked ? (
-                        <button
-                          type="button"
-                          onClick={() => setPaymentMode("partial")}
-                          className={cn(
-                            "rounded-xl border p-4 text-left transition-all",
-                            paymentMode === "partial"
-                              ? "border-primary bg-primary/5 ring-2 ring-primary/20"
-                              : "border-muted hover:border-primary/40"
-                          )}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-semibold text-sm">
-                              Pay {Math.round(DEPOSIT_PERCENT * 100)}% deposit
-                            </span>
-                            {paymentMode === "partial" && (
-                              <Check className="h-4 w-4 text-primary" />
-                            )}
-                          </div>
-                          <p className="text-xl font-bold">
-                            ${depositAmount(total).toLocaleString()}
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            ${remainingAmount(total).toLocaleString()} due 30 days
-                            before departure
-                          </p>
-                        </button>
-                      ) : null}
+                      )}
                     </div>
 
+                    {paymentMode === "full" && (
+                      <div className="rounded-xl bg-muted/30 border p-3 text-sm">
+                        <p className="font-semibold">
+                          ${total.toLocaleString()} today — one charge,
+                          you&apos;re all set.
+                        </p>
+                      </div>
+                    )}
+
                     {installmentsBlocked && selectedTrip && (
-                      <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
                         <p className="font-semibold">
                           Partial payment isn&apos;t available for this trip.
                         </p>
@@ -1026,24 +1021,29 @@ function CheckoutContent() {
                       </div>
                     )}
 
-                    {installmentsAllowed &&
-                      installmentSchedule &&
-                      paymentMode === "partial" && (
-                        <div className="mt-3 rounded-xl border bg-muted/30 p-3 space-y-1.5">
-                          <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-                            Your installment schedule
-                          </p>
+                    {paymentMode === "partial" &&
+                      installmentsAllowed &&
+                      installmentSchedule && (
+                        <div className="rounded-xl border bg-muted/30 p-4 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                              Your installment schedule
+                            </p>
+                            <span className="text-[11px] text-muted-foreground">
+                              3 equal payments
+                            </span>
+                          </div>
                           {installmentSchedule.map((s) => (
                             <div
                               key={s.index}
-                              className="flex items-center justify-between gap-2 rounded-md bg-white border px-3 py-2"
+                              className="flex items-center justify-between gap-2 rounded-lg bg-white border px-3 py-2.5"
                             >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary shrink-0">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary shrink-0">
                                   {s.index}
                                 </span>
                                 <div className="min-w-0">
-                                  <p className="text-xs font-semibold truncate">
+                                  <p className="text-sm font-semibold truncate">
                                     {s.label}
                                   </p>
                                   <p className="text-[11px] text-muted-foreground">
@@ -1056,6 +1056,56 @@ function CheckoutContent() {
                               </p>
                             </div>
                           ))}
+                          <div className="mt-1 flex items-center justify-between rounded-lg bg-primary/5 border border-primary/15 px-3 py-2">
+                            <span className="text-xs font-semibold">
+                              Due today
+                            </span>
+                            <span className="text-base font-bold text-primary">
+                              ${installmentSchedule[0].amount.toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                    {paymentMode === "partial" &&
+                      !installmentsAllowed &&
+                      !installmentsBlocked && (
+                        <div className="rounded-xl border bg-muted/30 p-4 space-y-2">
+                          <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                            Deposit plan
+                          </p>
+                          <div className="flex items-center justify-between rounded-lg bg-white border px-3 py-2.5">
+                            <div>
+                              <p className="text-sm font-semibold">Today</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                {Math.round(DEPOSIT_PERCENT * 100)}% deposit
+                              </p>
+                            </div>
+                            <p className="text-sm font-bold">
+                              ${depositAmount(total).toLocaleString()}
+                            </p>
+                          </div>
+                          <div className="flex items-center justify-between rounded-lg bg-white border px-3 py-2.5">
+                            <div>
+                              <p className="text-sm font-semibold">
+                                30 days before departure
+                              </p>
+                              <p className="text-[11px] text-muted-foreground">
+                                Remaining balance
+                              </p>
+                            </div>
+                            <p className="text-sm font-bold">
+                              ${remainingAmount(total).toLocaleString()}
+                            </p>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between rounded-lg bg-primary/5 border border-primary/15 px-3 py-2">
+                            <span className="text-xs font-semibold">
+                              Due today
+                            </span>
+                            <span className="text-base font-bold text-primary">
+                              ${depositAmount(total).toLocaleString()}
+                            </span>
+                          </div>
                         </div>
                       )}
                   </div>
