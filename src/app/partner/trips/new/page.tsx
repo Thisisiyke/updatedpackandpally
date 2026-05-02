@@ -1429,7 +1429,7 @@ export default function NewTripPage() {
                   </div>
                 </div>
                 <p className="text-[11px] text-muted-foreground pt-1 border-t">
-                  Pack &amp; Pally&apos;s 6% platform fee is applied
+                  Pack &amp; Pally&apos;s 3% platform fee is applied
                   automatically on top — no action needed.
                 </p>
               </div>

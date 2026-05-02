@@ -34,6 +34,13 @@ import { PartnerTripTabs } from "@/components/mobile/partner-trip-tabs";
 import { AiSurveyCard } from "@/components/partner/ai-survey-card";
 import { generatePartnerTrip } from "@/lib/ai/partner-trip-generator";
 import {
+  computeInstallments,
+  daysUntilStart,
+  formatInstallmentDue,
+  installmentsEligible,
+  INSTALLMENTS_MIN_DAYS,
+} from "@/lib/installment-schedule";
+import {
   partnerTrips,
   tripCategories,
   type PartnerTrip,
@@ -85,6 +92,9 @@ export default function MobilePartnerTripOverview({
   const [price, setPrice] = useState(0);
   const [taxRatePct, setTaxRatePct] = useState("8.25");
   const [useTieredPricing, setUseTieredPricing] = useState(false);
+  const [installmentsEnabled, setInstallmentsEnabled] = useState(false);
+  const [requireTravelerId, setRequireTravelerId] = useState(false);
+  const [requestSocialMedia, setRequestSocialMedia] = useState(false);
   const [priceSolo, setPriceSolo] = useState(0);
   const [priceCouple, setPriceCouple] = useState(0);
   const [priceGroupOf3, setPriceGroupOf3] = useState(0);
@@ -172,6 +182,9 @@ export default function MobilePartnerTripOverview({
     setHighlights(t.highlights);
     setIncluded(t.included);
     setNotIncluded(t.notIncluded);
+    setInstallmentsEnabled(!!t.partialPayment?.enabled);
+    setRequireTravelerId(!!t.requireTravelerId);
+    setRequestSocialMedia(!!t.requestSocialMedia);
     return subscribeToUserPartnerTrips(() => {
       const fresh = findTripById(id);
       if (fresh) setInitial(fresh);
@@ -199,7 +212,10 @@ export default function MobilePartnerTripOverview({
       JSON.stringify(itinerary) !== JSON.stringify(initial.itinerary) ||
       JSON.stringify(highlights) !== JSON.stringify(initial.highlights) ||
       JSON.stringify(included) !== JSON.stringify(initial.included) ||
-      JSON.stringify(notIncluded) !== JSON.stringify(initial.notIncluded)
+      JSON.stringify(notIncluded) !== JSON.stringify(initial.notIncluded) ||
+      installmentsEnabled !== !!initial.partialPayment?.enabled ||
+      requireTravelerId !== !!initial.requireTravelerId ||
+      requestSocialMedia !== !!initial.requestSocialMedia
     );
   }, [
     initial,
@@ -220,6 +236,9 @@ export default function MobilePartnerTripOverview({
     highlights,
     included,
     notIncluded,
+    installmentsEnabled,
+    requireTravelerId,
+    requestSocialMedia,
   ]);
 
   if (!initial) {
@@ -271,6 +290,11 @@ export default function MobilePartnerTripOverview({
       priceTiers: useTieredPricing
         ? { solo: priceSolo, couple: priceCouple, groupOf3: priceGroupOf3 }
         : undefined,
+      partialPayment: installmentsEnabled
+        ? { enabled: true, splits: [0.3334, 0.3333, 0.3333] }
+        : undefined,
+      requireTravelerId: requireTravelerId || undefined,
+      requestSocialMedia: requestSocialMedia || undefined,
       itinerary: itinerary.map((d, i) => ({ ...d, day: i + 1 })),
       highlights,
       included,
@@ -662,10 +686,69 @@ export default function MobilePartnerTripOverview({
                 </span>
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                Plus Pack &amp; Pally&apos;s 6% platform fee, applied
+                Plus Pack &amp; Pally&apos;s 3% platform fee, applied
                 automatically.
               </p>
             </Field>
+
+            {/* Allow partial payment */}
+            <div className="pt-3 border-t space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="flex-1">
+                  <p className="font-bold text-sm">Allow partial payment</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Travelers split into 3 installments scheduled before the
+                    trip starts.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={installmentsEnabled}
+                  onClick={() => setInstallmentsEnabled((v) => !v)}
+                  className={cn(
+                    "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+                    installmentsEnabled
+                      ? "bg-primary"
+                      : "bg-muted-foreground/25"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform",
+                      installmentsEnabled
+                        ? "translate-x-5"
+                        : "translate-x-0.5"
+                    )}
+                  />
+                </button>
+              </div>
+              {installmentsEnabled && initial.startDate && (
+                <InstallmentPreview
+                  totalPerPerson={price}
+                  startDate={initial.startDate}
+                />
+              )}
+            </div>
+          </EditCard>
+
+          {/* Guest data — host opt-ins surfaced at traveler checkout */}
+          <EditCard title="Guest data at checkout">
+            <p className="text-[11px] text-muted-foreground -mt-1">
+              Choose what travelers fill in when they book this trip.
+            </p>
+            <EditGuestToggle
+              title="Require government ID"
+              hint="Travelers must upload a passport, driver's license, or national ID before they can book."
+              checked={requireTravelerId}
+              onToggle={() => setRequireTravelerId((v) => !v)}
+            />
+            <EditGuestToggle
+              title="Ask for a social media profile"
+              hint="Optional — Instagram, LinkedIn, or other profile URL for the group to find each other."
+              checked={requestSocialMedia}
+              onToggle={() => setRequestSocialMedia((v) => !v)}
+            />
           </EditCard>
 
           {/* Itinerary */}
@@ -1093,6 +1176,92 @@ function AddRow({
         <Plus className="h-3.5 w-3.5" />
         Add
       </Button>
+    </div>
+  );
+}
+
+function EditGuestToggle({
+  title,
+  hint,
+  checked,
+  onToggle,
+}: {
+  title: string;
+  hint: string;
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border bg-muted/20 p-3">
+      <div className="flex-1">
+        <p className="text-xs font-semibold">{title}</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug">
+          {hint}
+        </p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={onToggle}
+        className={cn(
+          "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+          checked ? "bg-primary" : "bg-muted-foreground/25"
+        )}
+      >
+        <span
+          className={cn(
+            "inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform",
+            checked ? "translate-x-5" : "translate-x-0.5"
+          )}
+        />
+      </button>
+    </div>
+  );
+}
+
+function InstallmentPreview({
+  totalPerPerson,
+  startDate,
+}: {
+  totalPerPerson: number;
+  startDate: string;
+}) {
+  if (!installmentsEligible(startDate)) {
+    const days = daysUntilStart(startDate);
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-900">
+        Installments need at least {INSTALLMENTS_MIN_DAYS} days before the trip
+        starts. This trip is {days <= 0 ? "due" : `${days} day${days === 1 ? "" : "s"} away`} —
+        travelers will be asked to pay in full at checkout.
+      </div>
+    );
+  }
+  const schedule = computeInstallments(totalPerPerson, startDate);
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+        Per-person schedule
+      </p>
+      {schedule.map((s) => (
+        <div
+          key={s.index}
+          className="rounded-lg border bg-muted/20 p-3 flex items-center gap-3"
+        >
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-[11px] font-bold text-primary shrink-0">
+            {s.index}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold truncate">{s.label}</p>
+            <p className="text-[10px] text-muted-foreground">
+              Due {formatInstallmentDue(s.dueAt)} · {Math.round(s.percent * 100)}%
+            </p>
+          </div>
+          <p className="font-bold text-sm shrink-0">
+            ${s.amount.toLocaleString()}
+          </p>
+        </div>
+      ))}
     </div>
   );
 }

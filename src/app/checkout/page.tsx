@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -48,6 +48,13 @@ import {
   calculatePriceBreakdown,
   formatRatePercent,
 } from "@/lib/trip-pricing";
+import {
+  computeInstallments,
+  installmentsEligible,
+  formatInstallmentDue,
+  daysUntilStart,
+  INSTALLMENTS_MIN_DAYS,
+} from "@/lib/installment-schedule";
 import { trips } from "@/data/trips";
 import { hosts } from "@/data/hosts";
 import type { Trip } from "@/types";
@@ -150,6 +157,45 @@ function CheckoutContent() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [specialRequests, setSpecialRequests] = useState("");
+  const [travelerIdFile, setTravelerIdFile] = useState<{
+    name: string;
+    dataUrl: string;
+    sizeBytes: number;
+    type: string;
+  } | null>(null);
+  const [idError, setIdError] = useState<string | null>(null);
+  const [socialLink, setSocialLink] = useState("");
+  const idInputRef = useRef<HTMLInputElement>(null);
+
+  const handleIdUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIdError(null);
+    const ok =
+      file.type === "application/pdf" ||
+      file.type.startsWith("image/") ||
+      /\.(pdf|jpg|jpeg|png|heic)$/i.test(file.name);
+    if (!ok) {
+      setIdError("Upload a PDF or image (JPG, PNG).");
+      if (idInputRef.current) idInputRef.current.value = "";
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setIdError("Keep it under 8 MB.");
+      if (idInputRef.current) idInputRef.current.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () =>
+      setTravelerIdFile({
+        name: file.name,
+        dataUrl: String(reader.result || ""),
+        sizeBytes: file.size,
+        type: file.type,
+      });
+    reader.readAsDataURL(file);
+    if (idInputRef.current) idInputRef.current.value = "";
+  };
 
   // Trip-specific state
   const spotsAvailable = selectedTrip
@@ -229,6 +275,18 @@ function CheckoutContent() {
     selectedTrip?.wanderly?.timestamp,
   ]);
 
+  useEffect(() => {
+    if (
+      type === "trip" &&
+      selectedTrip?.partialPayment?.enabled &&
+      !installmentsEligible(selectedTrip.startDate) &&
+      paymentMode === "partial"
+    ) {
+      setPaymentMode("full");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTrip?.id]);
+
   // Step 2: Payment
   const [cardNumber, setCardNumber] = useState("");
   const [cardName, setCardName] = useState("");
@@ -304,8 +362,22 @@ function CheckoutContent() {
   const taxes = breakdown.tax + breakdown.platformFee;
   const total = breakdown.total;
 
-  // For real Wanderly trips, use wanderly math (20% partial, 12% service, 8.25% tax).
-  // For other booking types (hotel/flight), fall back to the generic 30% deposit model.
+  const installmentsAllowed =
+    type === "trip" &&
+    !!selectedTrip?.partialPayment?.enabled &&
+    !!selectedTrip &&
+    installmentsEligible(selectedTrip.startDate);
+  const installmentsBlocked =
+    type === "trip" &&
+    !!selectedTrip?.partialPayment?.enabled &&
+    !!selectedTrip &&
+    !installmentsEligible(selectedTrip.startDate);
+  const installmentSchedule =
+    installmentsAllowed && selectedTrip
+      ? computeInstallments(total, selectedTrip.startDate)
+      : null;
+
+  // Wanderly Stripe trips use backend pricing math; others use installments or the platform deposit model.
   const wanderlyPartialDueNow = wAmt ? wAmt.GrandpartialAmt : null;
   const wanderlyPartialDueLater = wAmt
     ? Number((wAmt.GrandFullAmt - wAmt.GrandpartialAmt).toFixed(2))
@@ -315,20 +387,22 @@ function CheckoutContent() {
     type === "trip" && paymentMode === "partial"
       ? useWanderlyStripe && wanderlyPartialDueNow !== null
         ? wanderlyPartialDueNow
-        : depositAmount(total)
+        : installmentSchedule
+          ? installmentSchedule[0].amount
+          : depositAmount(total)
       : useWanderlyStripe && wAmt
-      ? wAmt.GrandFullAmt
-      : total;
+        ? wAmt.GrandFullAmt
+        : total;
   const amountDueLater =
     type === "trip" && paymentMode === "partial"
       ? useWanderlyStripe && wanderlyPartialDueLater !== null
         ? wanderlyPartialDueLater
-        : remainingAmount(total)
+        : installmentSchedule
+          ? installmentSchedule[1].amount + installmentSchedule[2].amount
+          : remainingAmount(total)
       : 0;
 
-  // Label: "20% deposit" for wanderly trips, "30% deposit" for generic.
   const depositPctLabel = useWanderlyStripe ? 20 : Math.round(DEPOSIT_PERCENT * 100);
-  // Due-date copy: wanderly stores scheduleDateToPay = 1 week before start.
   const remainingDueCopy = useWanderlyStripe
     ? "1 week before departure"
     : "30 days before departure";
@@ -412,7 +486,24 @@ function CheckoutContent() {
       bookingId,
       type,
       createdAt: new Date().toISOString(),
-      contact: { firstName, lastName, email, phone },
+      contact: {
+        firstName,
+        lastName,
+        email,
+        phone,
+        socialMediaUrl:
+          type === "trip" && selectedTrip?.requestSocialMedia && socialLink.trim()
+            ? socialLink.trim()
+            : undefined,
+        travelerId:
+          type === "trip" && selectedTrip?.requireTravelerId && travelerIdFile
+            ? {
+                name: travelerIdFile.name,
+                sizeBytes: travelerIdFile.sizeBytes,
+                type: travelerIdFile.type,
+              }
+            : undefined,
+      },
       totalPrice: total,
       flight: selectedFlight || null,
       hotel: selectedHotel || null,
@@ -429,6 +520,16 @@ function CheckoutContent() {
       paymentMode: type === "trip" ? paymentMode : "full",
       amountPaidNow: amountDueNow,
       amountDueLater,
+      installments:
+        type === "trip" && paymentMode === "partial" && installmentSchedule
+          ? installmentSchedule.map((s) => ({
+              index: s.index,
+              label: s.label,
+              dueAt: s.dueAt,
+              amount: s.amount,
+              paid: s.index === 1,
+            }))
+          : null,
       specialRequests,
     };
 
@@ -674,11 +775,101 @@ function CheckoutContent() {
                   </div>
                 )}
 
+                {/* Government ID — when host requires it */}
+                {type === "trip" && selectedTrip?.requireTravelerId && (
+                  <div className="mt-6 pt-5 border-t space-y-3">
+                    <div>
+                      <Label>
+                        Government ID{" "}
+                        <span className="text-red-600">*</span>
+                      </Label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Your host needs to verify each traveler. Upload a
+                        passport, driver&apos;s license, or national ID.
+                      </p>
+                    </div>
+                    <input
+                      ref={idInputRef}
+                      type="file"
+                      accept="application/pdf,image/*,.pdf,.jpg,.jpeg,.png,.heic"
+                      onChange={handleIdUpload}
+                      className="hidden"
+                    />
+                    {travelerIdFile ? (
+                      <div className="rounded-xl border bg-muted/30 p-3 flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100 shrink-0">
+                          <Check className="h-5 w-5 text-emerald-700" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold truncate">
+                            {travelerIdFile.name}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {(travelerIdFile.sizeBytes / 1024).toFixed(0)} KB ·
+                            Encrypted in transit
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setTravelerIdFile(null)}
+                          className="shrink-0 text-red-600 hover:text-red-700"
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => idInputRef.current?.click()}
+                        className="flex h-24 w-full flex-col items-center justify-center rounded-xl border-2 border-dashed text-sm text-muted-foreground gap-1 hover:border-primary/40 hover:text-foreground transition-colors"
+                      >
+                        Click to upload ID
+                        <span className="text-xs">PDF or photo · up to 8 MB</span>
+                      </button>
+                    )}
+                    {idError && (
+                      <p className="text-xs text-red-600">{idError}</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Social media link — when host requests it */}
+                {type === "trip" && selectedTrip?.requestSocialMedia && (
+                  <div className="mt-6 pt-5 border-t space-y-2">
+                    <Label>
+                      Social media profile{" "}
+                      <span className="text-muted-foreground font-normal">
+                        (optional)
+                      </span>
+                    </Label>
+                    <Input
+                      type="url"
+                      value={socialLink}
+                      onChange={(e) => setSocialLink(e.target.value)}
+                      placeholder="https://instagram.com/your_handle"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Helps your trip group recognize each other before the
+                      trip.
+                    </p>
+                  </div>
+                )}
+
                 <div className="mt-6 flex justify-end">
                   <Button
                     size="lg"
                     onClick={handleStep1Next}
-                    disabled={!firstName || !lastName || !email || !phone}
+                    disabled={
+                      !firstName ||
+                      !lastName ||
+                      !email ||
+                      !phone ||
+                      (type === "trip" &&
+                        !!selectedTrip?.requireTravelerId &&
+                        !travelerIdFile)
+                    }
                   >
                     Continue to payment
                   </Button>
@@ -732,6 +923,7 @@ function CheckoutContent() {
                           One charge today — you&apos;re all set
                         </p>
                       </button>
+                      {useWanderlyStripe ? (
                       <button
                         type="button"
                         onClick={() => setPaymentMode("partial")}
@@ -758,7 +950,114 @@ function CheckoutContent() {
                           {remainingDueCopy}
                         </p>
                       </button>
+                      ) : installmentsAllowed && installmentSchedule ? (
+                        <button
+                          type="button"
+                          onClick={() => setPaymentMode("partial")}
+                          className={cn(
+                            "rounded-xl border p-4 text-left transition-all",
+                            paymentMode === "partial"
+                              ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+                              : "border-muted hover:border-primary/40"
+                          )}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-semibold text-sm">
+                              3 installments
+                            </span>
+                            {paymentMode === "partial" && (
+                              <Check className="h-4 w-4 text-primary" />
+                            )}
+                          </div>
+                          <p className="text-xl font-bold">
+                            ${installmentSchedule[0].amount.toLocaleString()}{" "}
+                            today
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Split into 3 equal payments — full schedule below
+                          </p>
+                        </button>
+                      ) : !installmentsBlocked ? (
+                        <button
+                          type="button"
+                          onClick={() => setPaymentMode("partial")}
+                          className={cn(
+                            "rounded-xl border p-4 text-left transition-all",
+                            paymentMode === "partial"
+                              ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+                              : "border-muted hover:border-primary/40"
+                          )}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-semibold text-sm">
+                              Pay {Math.round(DEPOSIT_PERCENT * 100)}% deposit
+                            </span>
+                            {paymentMode === "partial" && (
+                              <Check className="h-4 w-4 text-primary" />
+                            )}
+                          </div>
+                          <p className="text-xl font-bold">
+                            ${depositAmount(total).toLocaleString()}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            ${remainingAmount(total).toLocaleString()} due 30 days
+                            before departure
+                          </p>
+                        </button>
+                      ) : null}
                     </div>
+
+                    {installmentsBlocked && selectedTrip && (
+                      <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                        <p className="font-semibold">
+                          Partial payment isn&apos;t available for this trip.
+                        </p>
+                        <p className="mt-0.5 leading-snug">
+                          The host enabled installments, but this trip is{" "}
+                          {(() => {
+                            const d = daysUntilStart(selectedTrip.startDate);
+                            return d <= 0
+                              ? "due"
+                              : `${d} day${d === 1 ? "" : "s"} away`;
+                          })()}{" "}
+                          — installments need at least {INSTALLMENTS_MIN_DAYS}{" "}
+                          days to schedule. Pay in full to confirm your spot.
+                        </p>
+                      </div>
+                    )}
+
+                    {installmentsAllowed &&
+                      installmentSchedule &&
+                      paymentMode === "partial" && (
+                        <div className="mt-3 rounded-xl border bg-muted/30 p-3 space-y-1.5">
+                          <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                            Your installment schedule
+                          </p>
+                          {installmentSchedule.map((s) => (
+                            <div
+                              key={s.index}
+                              className="flex items-center justify-between gap-2 rounded-md bg-white border px-3 py-2"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary shrink-0">
+                                  {s.index}
+                                </span>
+                                <div className="min-w-0">
+                                  <p className="text-xs font-semibold truncate">
+                                    {s.label}
+                                  </p>
+                                  <p className="text-[11px] text-muted-foreground">
+                                    Due {formatInstallmentDue(s.dueAt)}
+                                  </p>
+                                </div>
+                              </div>
+                              <p className="text-sm font-bold">
+                                ${s.amount.toLocaleString()}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                   </div>
                 )}
 

@@ -21,6 +21,29 @@ export interface PartnerTrip {
   };
   /** Decimal (e.g. 0.0825 for 8.25%). Platform default 8.25% if unset. */
   taxRate?: number;
+  /**
+   * Host opt-in: when enabled, travelers see a 3-installment schedule at
+   * checkout instead of the platform 30%-deposit option. The schedule is
+   * computed from the trip's start date.
+   */
+  partialPayment?: {
+    enabled: boolean;
+    /** 3-tuple of decimals summing to 1. Defaults to equal thirds. */
+    splits: [number, number, number];
+  };
+  /** Host opt-in: travelers must upload a government ID at checkout. */
+  requireTravelerId?: boolean;
+  /** Host opt-in: travelers see an optional social-media profile input. */
+  requestSocialMedia?: boolean;
+  /** Optional PDF the host uploaded as the trip's formal policy document. */
+  tripPolicyPdf?: {
+    name: string;
+    /** data: URL — works in localStorage demo; would be a CDN URL in prod. */
+    dataUrl: string;
+    sizeBytes?: number;
+  };
+  /** Free-form host policy / house rules surfaced to travelers. */
+  hostPolicy?: string;
   currency: string;
   maxGroupSize: number;
   currentBookings: number;

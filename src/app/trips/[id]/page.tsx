@@ -17,6 +17,7 @@ import {
   Mountain,
   Minus,
   Plus,
+  Share2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -64,6 +65,7 @@ export default function TripDetailPage({
   const [termsOpen, setTermsOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [hostTerms, setHostTerms] = useState<HostTerms | null>(null);
+  const [shareToast, setShareToast] = useState<string | null>(null);
 
   useEffect(() => {
     const seed = trips.find((t) => t.id === id);
@@ -96,6 +98,33 @@ export default function TripDetailPage({
     return subscribeToHostTerms(refresh);
   }, [hostIdForTerms]);
 
+  const handleBookClick = () => ensureMember(() => setTermsOpen(true));
+
+  const handleShare = async () => {
+    if (!trip || typeof window === "undefined") return;
+    const url = `${window.location.origin}/trips/${trip.id}`;
+    const shareData = {
+      title: `${trip.title} · Pack & Pally`,
+      text: `Check out ${trip.title} in ${trip.destination}, ${trip.country} on Pack & Pally — join me?`,
+      url,
+    };
+    try {
+      if (typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share(shareData);
+        return;
+      }
+    } catch {
+      /* user dismissed share sheet — fall through to copy */
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareToast("Link copied to clipboard");
+    } catch {
+      setShareToast(url);
+    }
+    setTimeout(() => setShareToast(null), 2400);
+  };
+
   if (tripLoading) {
     return (
       <div className="py-24 text-center text-muted-foreground text-sm">
@@ -106,7 +135,6 @@ export default function TripDetailPage({
 
   if (!trip) return notFound();
 
-  const handleBookClick = () => ensureMember(() => setTermsOpen(true));
   const proceedToCheckout = () => {
     setTermsOpen(false);
     router.push(
@@ -456,6 +484,15 @@ export default function TripDetailPage({
                   Join This Trip
                 </Button>
 
+                <Button
+                  variant="outline"
+                  className="w-full h-10 gap-1.5"
+                  onClick={handleShare}
+                >
+                  <Share2 className="h-4 w-4" />
+                  Share with friends
+                </Button>
+
                 <button
                   type="button"
                   onClick={() => setCancelOpen(true)}
@@ -492,6 +529,13 @@ export default function TripDetailPage({
           </div>
         </div>
       </Container>
+
+      {shareToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] flex items-center gap-2 rounded-full bg-foreground/95 backdrop-blur px-4 py-2 text-sm font-medium text-background shadow-lg animate-[fade-in-up_300ms_ease-out]">
+          <Check className="h-4 w-4" />
+          {shareToast}
+        </div>
+      )}
 
       <TermsModal
         open={termsOpen}

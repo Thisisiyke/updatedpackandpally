@@ -21,6 +21,7 @@ import type {
   PartnerPayoutsApiOk,
   PartnerStripePayoutRow,
 } from "@/lib/partner-payouts-types";
+import { StripeAccountCard } from "@/components/partner/stripe-account-card";
 import { cn } from "@/lib/utils";
 
 function formatMajor(amountCents: number, currency: string) {
@@ -241,9 +242,20 @@ export default function PartnerPayoutsPage() {
 
   const heroBadgeLabel = np ? nextHeroBadge(np.status) : "Balance";
 
+  const [stripeAccountId, setStripeAccountId] = useState<string | null>(null);
+  const [stripeConnectedAt, setStripeConnectedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    setStripeAccountId(localStorage.getItem("packpally_stripe_account_id"));
+    setStripeConnectedAt(
+      localStorage.getItem("packpally_stripe_connected_at")
+    );
+  }, []);
+
   return (
     <div className="p-6 lg:p-10">
-      <div className="mb-8">
+      {/* Header */}
+      <div className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
           Payouts
         </h1>
@@ -275,6 +287,14 @@ export default function PartnerPayoutsPage() {
           </div>
         </div>
       )}
+
+      <div className="mb-6">
+        <StripeAccountCard
+          accountId={stripeAccountId}
+          connectedAt={stripeConnectedAt}
+          variant="comfortable"
+        />
+      </div>
 
       {loading && !error ? (
         <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">

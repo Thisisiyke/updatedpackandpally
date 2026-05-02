@@ -26,6 +26,10 @@ export const trips: Trip[] = [
     durationDays: 7,
     price: 2499,
     currency: "USD",
+    partialPayment: {
+      enabled: true,
+      splits: [0.3334, 0.3333, 0.3333],
+    },
     maxGroupSize: 12,
     currentBookings: 8,
     difficulty: "Easy",

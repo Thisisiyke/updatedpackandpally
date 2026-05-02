@@ -6,6 +6,8 @@ import { FeaturedHotels } from "@/components/landing/featured-hotels";
 import { AiPreview } from "@/components/landing/ai-preview";
 import { HostCta } from "@/components/landing/host-cta";
 import { Testimonials } from "@/components/landing/testimonials";
+import { DownloadApp } from "@/components/landing/download-app";
+import { FaqSection } from "@/components/landing/faq-section";
 
 export default function HomePage() {
   return (
@@ -18,6 +20,8 @@ export default function HomePage() {
       <AiPreview />
       <HostCta />
       <Testimonials />
+      <DownloadApp />
+      <FaqSection />
     </>
   );
 }

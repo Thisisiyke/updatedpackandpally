@@ -118,6 +118,12 @@ export default function TripEditPage({
   const [notIncluded, setNotIncluded] = useState<string[]>(
     initial?.notIncluded || []
   );
+  const [requireTravelerId, setRequireTravelerId] = useState(
+    !!initial?.requireTravelerId
+  );
+  const [requestSocialMedia, setRequestSocialMedia] = useState(
+    !!initial?.requestSocialMedia
+  );
   const [highlights, setHighlights] = useState<string[]>(
     initial?.highlights || []
   );
@@ -613,10 +619,32 @@ export default function TripEditPage({
                 </span>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                Plus Pack &amp; Pally&apos;s 6% platform fee, applied
+                Plus Pack &amp; Pally&apos;s 3% platform fee, applied
                 automatically.
               </p>
             </div>
+          </div>
+
+          {/* Guest data */}
+          <div className="rounded-2xl border bg-white p-6 space-y-4">
+            <div>
+              <h3 className="font-bold">Guest data at checkout</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Choose what travelers fill in when they book.
+              </p>
+            </div>
+            <WebGuestToggle
+              title="Require government ID"
+              hint="Travelers must upload a passport, driver's license, or national ID before they can book."
+              checked={requireTravelerId}
+              onToggle={() => setRequireTravelerId((v) => !v)}
+            />
+            <WebGuestToggle
+              title="Ask for social media profile"
+              hint="Optional Instagram / LinkedIn / other URL so the group recognizes each other."
+              checked={requestSocialMedia}
+              onToggle={() => setRequestSocialMedia((v) => !v)}
+            />
           </div>
 
           {/* Performance */}
@@ -687,6 +715,46 @@ export default function TripEditPage({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function WebGuestToggle({
+  title,
+  hint,
+  checked,
+  onToggle,
+}: {
+  title: string;
+  hint: string;
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border bg-muted/20 p-3">
+      <div className="flex-1">
+        <p className="text-sm font-semibold">{title}</p>
+        <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
+          {hint}
+        </p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={onToggle}
+        className={cn(
+          "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+          checked ? "bg-primary" : "bg-muted-foreground/25"
+        )}
+      >
+        <span
+          className={cn(
+            "inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform",
+            checked ? "translate-x-5" : "translate-x-0.5"
+          )}
+        />
+      </button>
     </div>
   );
 }

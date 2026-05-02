@@ -20,6 +20,18 @@ export interface Trip {
   };
   /** Decimal (e.g. 0.0825 for 8.25%). Platform default 8.25% if unset. */
   taxRate?: number;
+  /**
+   * Host-controlled installment plan. When `enabled` is true, travelers see a
+   * 3-installment schedule at checkout (subject to trip-start eligibility).
+   */
+  partialPayment?: {
+    enabled: boolean;
+    splits: [number, number, number];
+  };
+  /** When true, travelers must upload a government ID at checkout. */
+  requireTravelerId?: boolean;
+  /** When true, the checkout shows an optional Social media profile field. */
+  requestSocialMedia?: boolean;
   currency: string;
   maxGroupSize: number;
   currentBookings: number;

@@ -26,16 +26,19 @@ import { CURRENT_PARTNER } from "@/data/conversations";
 import { hosts } from "@/data/hosts";
 import { CURRENT_PARTNER_HOST_ID } from "@/lib/host-terms";
 import { disconnectStripe } from "@/lib/partner-stripe";
+import { StripeAccountCard } from "@/components/partner/stripe-account-card";
 import { cn } from "@/lib/utils";
 
 export default function MobilePartnerProfilePage() {
   const router = useRouter();
   const [logoutOpen, setLogoutOpen] = useState(false);
+  const [stripeAccountId, setStripeAccountId] = useState<string | null>(null);
   const [stripeConnectedAt, setStripeConnectedAt] = useState<string | null>(
     null
   );
 
   useEffect(() => {
+    setStripeAccountId(localStorage.getItem("packpally_stripe_account_id"));
     setStripeConnectedAt(
       localStorage.getItem("packpally_stripe_connected_at")
     );
@@ -114,6 +117,14 @@ export default function MobilePartnerProfilePage() {
               ))}
             </div>
           )}
+        </div>
+
+        {/* Stripe Connect account */}
+        <div className="px-5 mt-4">
+          <StripeAccountCard
+            accountId={stripeAccountId}
+            connectedAt={stripeConnectedAt}
+          />
         </div>
 
         {/* Switch to traveler — primary CTA */}
