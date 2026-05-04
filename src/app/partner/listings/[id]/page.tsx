@@ -37,6 +37,8 @@ import {
   patchPartnerListingStatus,
   updatePartnerListing,
 } from "@/lib/partner-listings-client";
+import { FEATURE_FLAGS, PROVIDER_NAMES } from "@/lib/constants";
+import { ProviderComingSoon } from "@/components/shared/provider-coming-soon";
 import { cn } from "@/lib/utils";
 
 const allAmenities = [
@@ -71,6 +73,25 @@ function LoadingBadge({ visible }: { visible: boolean }) {
 }
 
 export default function ListingEditPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  if (!FEATURE_FLAGS.hostPropertyListings) {
+    return (
+      <ProviderComingSoon
+        title="Property editor — coming soon"
+        description="Editing rooms, rates, and availability will pass through to your connected provider account once the integration ships."
+        provider={PROVIDER_NAMES.hotels}
+        ctaHref="/partner/trips"
+        ctaLabel="Back to Group Trips"
+      />
+    );
+  }
+  return <ListingEditImpl params={params} />;
+}
+
+function ListingEditImpl({
   params,
 }: {
   params: Promise<{ id: string }>;

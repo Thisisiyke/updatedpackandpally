@@ -8,6 +8,7 @@ import { HostCta } from "@/components/landing/host-cta";
 import { Testimonials } from "@/components/landing/testimonials";
 import { DownloadApp } from "@/components/landing/download-app";
 import { FaqSection } from "@/components/landing/faq-section";
+import { FEATURE_FLAGS } from "@/lib/constants";
 
 export default function HomePage() {
   return (
@@ -16,7 +17,7 @@ export default function HomePage() {
       <StatsBar />
       <HowItWorks />
       <FeaturedTrips />
-      <FeaturedHotels />
+      {FEATURE_FLAGS.publicHotelSearch && <FeaturedHotels />}
       <AiPreview />
       <HostCta />
       <Testimonials />

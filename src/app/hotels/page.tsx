@@ -9,6 +9,8 @@ import { Container } from "@/components/shared/container";
 import { HotelSearchForm } from "@/components/hotels/hotel-search-form";
 import { HotelCard } from "@/components/hotels/hotel-card";
 import { EmptyState } from "@/components/shared/empty-state";
+import { ProviderComingSoon } from "@/components/shared/provider-coming-soon";
+import { FEATURE_FLAGS, PROVIDER_NAMES } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -366,6 +368,22 @@ function HotelsContent() {
 }
 
 export default function HotelsPage() {
+  if (!FEATURE_FLAGS.publicHotelSearch) {
+    return (
+      <ProviderComingSoon
+        title="Hotel search — coming soon"
+        description="We're connecting to a global property network so you can book hotels and stays right alongside your group trips. Group trips are fully live in the meantime."
+        provider={PROVIDER_NAMES.hotels}
+        ctaHref="/browse-trips"
+        ctaLabel="Browse group trips"
+        perks={[
+          "Search 1M+ hotels and stays worldwide",
+          "Bundle stays with your group trip booking",
+          "Best-price guarantee from the provider",
+        ]}
+      />
+    );
+  }
   return (
     <Suspense fallback={<div className="py-20 text-center text-muted-foreground">Loading...</div>}>
       <HotelsContent />

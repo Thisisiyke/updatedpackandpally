@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { MobileHeader } from "@/components/mobile/mobile-header";
 import { BottomSheet } from "@/components/mobile/bottom-sheet";
 import { trips } from "@/data/trips";
+import { isDiscoverable } from "@/lib/trip-visibility";
 import { useWishlist } from "@/hooks/use-wishlist";
 import { cn } from "@/lib/utils";
 
@@ -58,6 +59,7 @@ export default function MobileTripsSearchPage() {
 
   const results = useMemo(() => {
     return trips.filter((t) => {
+      if (!isDiscoverable(t)) return false;
       if (continent !== "All" && t.continent !== continent) return false;
       if (priceMaxFilter !== null && t.price > priceMaxFilter) return false;
       if (durationMax !== null && t.durationDays > durationMax) return false;

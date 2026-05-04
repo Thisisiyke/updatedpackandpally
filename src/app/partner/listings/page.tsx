@@ -40,6 +40,8 @@ import {
 } from "@/lib/partner-listings-client";
 import { hostNeedsStripeConnect } from "@/lib/host-needs-stripe-connect";
 import { usePackPallyAuth } from "@/components/providers/session-provider";
+import { FEATURE_FLAGS, PROVIDER_NAMES } from "@/lib/constants";
+import { ProviderComingSoon } from "@/components/shared/provider-coming-soon";
 import { cn } from "@/lib/utils";
 
 function formatMoney(amount: number, currency: string) {
@@ -77,6 +79,27 @@ function getStatusConfig(status: string) {
 }
 
 export default function PartnerListingsPage() {
+  if (!FEATURE_FLAGS.hostPropertyListings) {
+    return (
+      <ProviderComingSoon
+        title="Property listings — coming soon"
+        description="Property and room inventory will sync from a third-party provider so you don't have to manage listings by hand. Group trip hosting is fully live in the meantime."
+        provider={PROVIDER_NAMES.hotels}
+        ctaHref="/partner/trips"
+        ctaLabel="Go to Group Trips"
+        perks={[
+          "Auto-sync availability + rates from your provider account",
+          "One inbox for property and group-trip messages",
+          "Unified payouts across all bookings",
+        ]}
+      />
+    );
+  }
+
+  return <PartnerListingsImpl />;
+}
+
+function PartnerListingsImpl() {
   const router = useRouter();
   const { user } = usePackPallyAuth();
   const needsStripe = hostNeedsStripeConnect(user);

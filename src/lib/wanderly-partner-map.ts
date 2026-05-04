@@ -24,6 +24,8 @@ export function uiTripToPartnerTrip(t: Trip): PartnerTrip {
     price: t.price,
     priceTiers: t.priceTiers,
     taxRate: t.taxRate,
+    partialPayment: t.partialPayment,
+    closeJoinDate: t.closeJoinDate,
     currency: t.currency,
     maxGroupSize: t.maxGroupSize,
     currentBookings: t.currentBookings,
@@ -75,6 +77,8 @@ export function wanderlyHostTripToPartnerTrip(raw: WanderlyTripRecord): PartnerT
     rating: t.rating,
     reviewCount: t.reviewCount,
     taxRate: t.taxRate,
+    partialPayment: t.partialPayment,
+    closeJoinDate: t.closeJoinDate,
   };
 }
 

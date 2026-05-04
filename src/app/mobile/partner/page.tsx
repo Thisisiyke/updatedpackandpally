@@ -16,6 +16,7 @@ import {
   Bell,
   Trash2,
   RotateCw,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -476,6 +477,12 @@ function TripRow({
                 ? "Sold out"
                 : trip.status}
             </Badge>
+            {trip.visibility === "private" && (
+              <Badge className="text-[9px] shrink-0 gap-0.5 bg-amber-100 text-amber-900 border-amber-200">
+                <Lock className="h-2.5 w-2.5" />
+                Private
+              </Badge>
+            )}
             {trip.rating > 0 && (
               <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
                 <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" />

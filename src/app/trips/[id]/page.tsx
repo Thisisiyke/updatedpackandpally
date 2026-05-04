@@ -3,7 +3,7 @@
 import { use, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { notFound, useRouter } from "next/navigation";
+import { notFound, useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronRight,
   Calendar,
@@ -18,6 +18,7 @@ import {
   Minus,
   Plus,
   Share2,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +34,7 @@ import { Container } from "@/components/shared/container";
 import { RatingStars } from "@/components/shared/rating-stars";
 import { TermsModal } from "@/components/shared/terms-modal";
 import { CancellationPolicyModal } from "@/components/shared/cancellation-policy-modal";
+import { ReviewSection } from "@/components/shared/review-section";
 import { trips } from "@/data/trips";
 import { hosts } from "@/data/hosts";
 import type { Trip } from "@/types";
@@ -47,7 +49,12 @@ import {
   calculatePriceBreakdown,
   formatRatePercent,
 } from "@/lib/trip-pricing";
+import {
+  bookingClosedMessage,
+  resolveBookingWindow,
+} from "@/lib/trip-booking-window";
 import { useRequireMember } from "@/hooks/use-require-member";
+import { canAccessTrip } from "@/lib/trip-visibility";
 
 export default function TripDetailPage({
   params,
@@ -56,6 +63,8 @@ export default function TripDetailPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const shareKey = searchParams.get("k");
   const { ensureMember, loginDialog } = useRequireMember();
   const seedTrip = trips.find((t) => t.id === id);
   const [trip, setTrip] = useState<Trip | null>(seedTrip ?? null);
@@ -135,6 +144,26 @@ export default function TripDetailPage({
 
   if (!trip) return notFound();
 
+  if (!canAccessTrip(trip, shareKey)) {
+    return (
+      <Container className="py-20">
+        <div className="mx-auto max-w-md rounded-2xl border bg-white p-8 text-center shadow-sm">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+            <Lock className="h-5 w-5" />
+          </div>
+          <h1 className="mt-4 text-2xl font-bold">This trip is private</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Only people with the host&apos;s share link can view this trip.
+            Ask the host for an invite link to join.
+          </p>
+          <Button asChild className="mt-6">
+            <Link href="/browse-trips">Browse public trips</Link>
+          </Button>
+        </div>
+      </Container>
+    );
+  }
+
   const proceedToCheckout = () => {
     setTermsOpen(false);
     router.push(
@@ -145,6 +174,14 @@ export default function TripDetailPage({
   const host = hosts.find((h) => h.id === trip.hostId);
   const spotsLeft = trip.maxGroupSize - trip.currentBookings;
   const fillPercentage = (trip.currentBookings / trip.maxGroupSize) * 100;
+  const bookingWindow = resolveBookingWindow({
+    startDate: trip.startDate,
+    closeJoinDate: trip.closeJoinDate,
+    currentBookings: trip.currentBookings,
+    maxGroupSize: trip.maxGroupSize,
+  });
+  const closedMessage = bookingClosedMessage(bookingWindow);
+  const bookingsBlocked = bookingWindow.status !== "open";
 
   const startDate = new Date(trip.startDate).toLocaleDateString("en-US", {
     month: "long",
@@ -361,6 +398,10 @@ export default function TripDetailPage({
                 </div>
               </div>
             )}
+
+            {/* Reviews */}
+            <Separator className="my-8" />
+            <ReviewSection tripId={trip.id} tripTitle={trip.title} />
           </div>
 
           {/* Right Column - Booking Card */}
@@ -476,12 +517,24 @@ export default function TripDetailPage({
                   );
                 })()}
 
+                {closedMessage && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                    <p className="font-semibold">Bookings closed</p>
+                    <p className="mt-0.5 leading-snug">{closedMessage}</p>
+                  </div>
+                )}
+
                 <Button
                   className="w-full h-12 text-base"
                   size="lg"
                   onClick={handleBookClick}
+                  disabled={bookingsBlocked}
                 >
-                  Join This Trip
+                  {bookingWindow.status === "closed-by-host"
+                    ? "Bookings closed"
+                    : bookingWindow.status === "trip-started"
+                      ? "Trip already started"
+                      : "Join This Trip"}
                 </Button>
 
                 <Button
@@ -523,8 +576,16 @@ export default function TripDetailPage({
                 ${trip.price.toLocaleString()}
               </p>
             </div>
-            <Button size="lg" onClick={handleBookClick}>
-              Join This Trip
+            <Button
+              size="lg"
+              onClick={handleBookClick}
+              disabled={bookingsBlocked}
+            >
+              {bookingWindow.status === "closed-by-host"
+                ? "Closed"
+                : bookingWindow.status === "trip-started"
+                  ? "Started"
+                  : "Join This Trip"}
             </Button>
           </div>
         </div>

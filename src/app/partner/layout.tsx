@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { PartnerSidebar } from "@/components/partner/partner-sidebar";
 import { PartnerStripeConnectBanner } from "@/components/partner/partner-stripe-connect-banner";
+import { PartnerHeader } from "@/components/partner/partner-header";
 import { usePackPallyAuthOptional } from "@/components/providers/session-provider";
 
 export default function PartnerLayout({
@@ -50,21 +51,24 @@ export default function PartnerLayout({
 
   if (status === "checking") {
     return (
-      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-muted/30 text-sm text-muted-foreground">
-        Loading partner portal…
+      <div className="flex min-h-screen items-center justify-center bg-muted/30 text-sm text-muted-foreground">
+        Loading host portal…
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] bg-muted/30">
-      <div className="hidden lg:block">
-        <PartnerSidebar />
+    <div className="min-h-screen flex flex-col bg-muted/30">
+      <PartnerHeader />
+      <div className="flex flex-1 min-h-0">
+        <div className="hidden lg:block">
+          <PartnerSidebar />
+        </div>
+        <main className="flex-1 min-w-0 flex flex-col">
+          <PartnerStripeConnectBanner />
+          <div className="flex-1 min-w-0">{children}</div>
+        </main>
       </div>
-      <main className="flex-1 min-w-0 flex flex-col">
-        <PartnerStripeConnectBanner />
-        <div className="flex-1 min-w-0">{children}</div>
-      </main>
     </div>
   );
 }

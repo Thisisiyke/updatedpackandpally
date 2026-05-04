@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import { isDiscoverable } from "@/lib/trip-visibility";
 import { Trip } from "@/types";
 
 export function useFilterTrips() {
@@ -57,7 +58,8 @@ export function useFilterTrips() {
   ];
 
   const filtered = useMemo(() => {
-    let result = [...sourceTrips];
+    // Only public trips ever surface in browse / discovery.
+    let result = sourceTrips.filter(isDiscoverable);
 
     if (search) {
       const q = search.toLowerCase();

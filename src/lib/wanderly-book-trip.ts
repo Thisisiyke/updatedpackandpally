@@ -3,6 +3,7 @@ import {
   wanderlyBookingAmounts,
   schedulePayDateOneWeekBefore,
 } from "@/lib/wanderly-booking-math";
+import { computeInstallments } from "@/lib/installment-schedule";
 
 export function buildBookTripBody(input: {
   trip: Trip;
@@ -25,11 +26,49 @@ export function buildBookTripBody(input: {
     input.travelers
   );
   const isPartial = input.paymentMode === "partial";
-  const charge = isPartial ? math.GrandpartialAmt : math.GrandFullAmt;
+
+  // Partial = pay in N installments based on the host's chosen schedule.
+  // `installmentPlan` is stored on the booking so travelers can adjust due
+  // dates (not amounts) for unpaid installments after checkout.
+  const installmentSchedule = isPartial
+    ? computeInstallments(
+        Math.round(math.GrandFullAmt),
+        input.trip.startDate,
+        input.trip.partialPayment?.schedule || "biweekly",
+        input.trip.partialPayment?.customSplits
+      )
+    : null;
+  const charge = installmentSchedule
+    ? installmentSchedule[0].amount
+    : math.GrandFullAmt;
   const scheduleDateToPay = schedulePayDateOneWeekBefore(input.trip.startDate);
-  const amountToPay = isPartial
-    ? (math.GrandFullAmt - math.GrandpartialAmt).toFixed(2)
+  const amountToPay = installmentSchedule
+    ? installmentSchedule
+        .slice(1)
+        .reduce((sum, s) => sum + s.amount, 0)
+        .toFixed(2)
     : "0";
+
+  // Service fee + tax on the partial leg are scaled to installment 1's share
+  // of the full amount so percentages stay consistent with the new schedule.
+  const partialShare = installmentSchedule
+    ? installmentSchedule[0].amount / Math.round(math.GrandFullAmt)
+    : 0;
+  const partialServiceFee = Number(
+    (math.fullAmtServiceFee * partialShare).toFixed(2)
+  );
+  const partialTax = Number((math.fullAmtTax * partialShare).toFixed(2));
+
+  const installmentPlan =
+    isPartial && installmentSchedule && installmentSchedule.length > 0
+      ? {
+          installments: installmentSchedule.map((s) => ({
+            index: s.index,
+            amount: s.amount,
+            dueAt: s.dueAt,
+          })),
+        }
+      : undefined;
 
   return {
     amountPaid: [
@@ -37,8 +76,8 @@ export function buildBookTripBody(input: {
         installment1: charge,
         paymentId: input.paymentIntentId,
         customerId: input.customerId || "",
-        serviceFee: isPartial ? math.partialAmtServiceFee : math.fullAmtServiceFee,
-        taxFee: isPartial ? math.partialAmtTax : math.fullAmtTax,
+        serviceFee: isPartial ? partialServiceFee : math.fullAmtServiceFee,
+        taxFee: isPartial ? partialTax : math.fullAmtTax,
       },
     ],
     tripId: w._id,
@@ -59,11 +98,12 @@ export function buildBookTripBody(input: {
     nights: w.nights || String(Math.max(0, input.trip.durationDays - 1)),
     mornings: w.mornings || String(input.trip.durationDays),
     userProfileImg: input.userProfileImg || "",
-    serviceFee: isPartial ? math.partialAmtServiceFee : math.fullAmtServiceFee,
-    taxFee: isPartial ? math.partialAmtTax : math.fullAmtTax,
+    serviceFee: isPartial ? partialServiceFee : math.fullAmtServiceFee,
+    taxFee: isPartial ? partialTax : math.fullAmtTax,
     endDate: input.trip.endDate,
     scheduleDateToPay,
     amountToPay,
+    ...(installmentPlan ? { installmentPlan } : {}),
     mobile: input.mobile.replace(/\D/g, ""),
     refundBeforeDays: "60",
     refundDescription: "Full refund 60+ days before trip; 5% fee < 60 days; 20% fee < 48 hours. Host cancellation = full refund.",

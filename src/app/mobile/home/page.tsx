@@ -29,6 +29,7 @@ import { Calendar as InlineCalendar } from "@/components/mobile/calendar";
 import { MobileHomeSkeleton } from "@/components/mobile/home-skeleton";
 import { useConversations } from "@/hooks/use-conversations";
 import { trips } from "@/data/trips";
+import { isDiscoverable } from "@/lib/trip-visibility";
 import { airports } from "@/data/airports";
 import { cn } from "@/lib/utils";
 
@@ -121,7 +122,9 @@ export default function MobileHomePage() {
       }[] = [];
       [
         ...popularDestinations.map((p) => ({ city: p.city, country: p.country })),
-        ...trips.map((t) => ({ city: t.destination, country: t.country })),
+        ...trips
+          .filter(isDiscoverable)
+          .map((t) => ({ city: t.destination, country: t.country })),
       ].forEach((d) => {
         const key = `${d.city}-${d.country}`;
         if (seen.has(key)) return;
@@ -144,7 +147,7 @@ export default function MobileHomePage() {
     }
 
     // trips
-    const tripPool = trips.map((t) => ({
+    const tripPool = trips.filter(isDiscoverable).map((t) => ({
       primary: t.title,
       secondary: `${t.destination}, ${t.country}`,
       tag: t.category[0],
@@ -182,7 +185,7 @@ export default function MobileHomePage() {
     }
   };
 
-  const featured = trips.slice(0, 4);
+  const featured = trips.filter(isDiscoverable).slice(0, 4);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();

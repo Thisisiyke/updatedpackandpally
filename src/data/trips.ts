@@ -28,8 +28,10 @@ export const trips: Trip[] = [
     currency: "USD",
     partialPayment: {
       enabled: true,
-      splits: [0.3334, 0.3333, 0.3333],
+      schedule: "biweekly",
     },
+    requireTravelerId: true,
+    requestSocialMedia: true,
     maxGroupSize: 12,
     currentBookings: 8,
     difficulty: "Easy",

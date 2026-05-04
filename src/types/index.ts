@@ -22,12 +22,28 @@ export interface Trip {
   taxRate?: number;
   /**
    * Host-controlled installment plan. When `enabled` is true, travelers see a
-   * 3-installment schedule at checkout (subject to trip-start eligibility).
+   * "Pay partial payment" option at checkout that splits the total across
+   * multiple installments. Strategy controls how dates/amounts are derived:
+   *   - "biweekly": one installment every ~14 days from booking to a week
+   *     before the trip starts (number of installments depends on time left).
+   *   - "weekly": one installment every ~7 days, same idea.
+   *   - "custom": host-defined list of {dueAt, percent} — percents must sum
+   *     to 1 and cover the whole total.
+   * Disabled automatically when the trip start is within 48 hours.
    */
   partialPayment?: {
     enabled: boolean;
-    splits: [number, number, number];
+    schedule?: "biweekly" | "weekly" | "custom";
+    /** Required when schedule === "custom". */
+    customSplits?: { dueAt: string; percent: number }[];
   };
+  /**
+   * Optional date (ISO YYYY-MM-DD) after which new bookings are not accepted.
+   * Set by the host on the trip itself. Should be on/before `startDate`.
+   * When today is past this date, the trip detail page disables the booking
+   * CTA and checkout blocks new bookings with a "bookings closed" notice.
+   */
+  closeJoinDate?: string;
   /** When true, travelers must upload a government ID at checkout. */
   requireTravelerId?: boolean;
   /** When true, the checkout shows an optional Social media profile field. */
@@ -60,6 +76,12 @@ export interface Trip {
     latitude?: number;
     longitude?: number;
   };
+  /**
+   * Discovery visibility. "public" trips appear in browse / featured /
+   * mobile discovery. "private" trips are only reachable via direct share
+   * link. Defaults to "public" if unset.
+   */
+  visibility?: "public" | "private";
 }
 
 export interface ItineraryDay {

@@ -21,6 +21,8 @@ import {
   FileText,
   Upload,
   Trash2,
+  Globe,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,13 +31,8 @@ import { MobileHeader } from "@/components/mobile/mobile-header";
 import { generatePartnerTrip } from "@/lib/ai/partner-trip-generator";
 import { tripCategories, type PartnerTrip } from "@/data/partner-trips";
 import { saveUserPartnerTrip } from "@/lib/user-partner-trips";
-import {
-  computeInstallments,
-  daysUntilStart,
-  formatInstallmentDue,
-  installmentsEligible,
-  INSTALLMENTS_MIN_DAYS,
-} from "@/lib/installment-schedule";
+import { PartialPaymentCard } from "@/components/partner/partial-payment-card";
+import type { CustomSplit, PaymentSchedule } from "@/lib/installment-schedule";
 import { CURRENT_PARTNER_HOST_ID } from "@/lib/host-terms";
 import { cn } from "@/lib/utils";
 
@@ -70,11 +67,13 @@ export default function MobileCreateTripPage() {
     "Easy" | "Moderate" | "Challenging"
   >("Moderate");
   const [categories, setCategories] = useState<string[]>(["Cultural"]);
+  const [visibility, setVisibility] = useState<"public" | "private">("public");
   const [generating, setGenerating] = useState(false);
 
   // Step 2
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [closeJoinDate, setCloseJoinDate] = useState("");
   const [maxGroupSize, setMaxGroupSize] = useState(10);
 
   // Step 3
@@ -99,6 +98,11 @@ export default function MobileCreateTripPage() {
   const [price, setPrice] = useState(1999);
   const [taxRatePct, setTaxRatePct] = useState("8.25");
   const [installmentsEnabled, setInstallmentsEnabled] = useState(false);
+  const [paymentSchedule, setPaymentSchedule] =
+    useState<PaymentSchedule>("biweekly");
+  const [paymentCustomSplits, setPaymentCustomSplits] = useState<CustomSplit[]>(
+    []
+  );
   const [useTieredPricing, setUseTieredPricing] = useState(false);
   const [priceSolo, setPriceSolo] = useState(2499);
   const [priceCouple, setPriceCouple] = useState(2199);
@@ -297,8 +301,15 @@ export default function MobileCreateTripPage() {
         : undefined,
       taxRate: Number(taxRatePct) / 100,
       partialPayment: installmentsEnabled
-        ? { enabled: true, splits: [0.3334, 0.3333, 0.3333] }
+        ? {
+            enabled: true,
+            schedule: paymentSchedule,
+            ...(paymentSchedule === "custom"
+              ? { customSplits: paymentCustomSplits }
+              : {}),
+          }
         : undefined,
+      closeJoinDate: closeJoinDate || undefined,
       requireTravelerId: requireTravelerId || undefined,
       requestSocialMedia: requestSocialMedia || undefined,
       tripPolicyPdf: tripPolicyPdf || undefined,
@@ -317,6 +328,7 @@ export default function MobileCreateTripPage() {
       included,
       notIncluded,
       status: "published",
+      visibility,
       revenue: 0,
       createdAt: new Date().toISOString(),
       rating: 0,
@@ -475,6 +487,52 @@ export default function MobileCreateTripPage() {
                 placeholder="What makes this trip special?"
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               />
+            </Field>
+
+            <Field label="Trip visibility">
+              <div className="grid grid-cols-1 gap-2">
+                {[
+                  {
+                    value: "public" as const,
+                    icon: Globe,
+                    title: "Public",
+                    desc: "Listed in browse and featured. Anyone can find and join.",
+                  },
+                  {
+                    value: "private" as const,
+                    icon: Lock,
+                    title: "Private",
+                    desc: "Not listed publicly. Only people with the link can see and book it.",
+                  },
+                ].map((v) => (
+                  <button
+                    key={v.value}
+                    type="button"
+                    onClick={() => setVisibility(v.value)}
+                    className={cn(
+                      "rounded-xl border p-3 text-left transition-colors",
+                      visibility === v.value
+                        ? "border-primary bg-primary/5"
+                        : ""
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <v.icon
+                        className={cn(
+                          "h-3.5 w-3.5",
+                          visibility === v.value
+                            ? "text-primary"
+                            : "text-muted-foreground"
+                        )}
+                      />
+                      <p className="text-xs font-bold">{v.title}</p>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
+                      {v.desc}
+                    </p>
+                  </button>
+                ))}
+              </div>
             </Field>
 
             <button
@@ -668,6 +726,26 @@ export default function MobileCreateTripPage() {
                 <span className="text-muted-foreground"> · {durationDays - 1} nights</span>
               </div>
             )}
+
+            <Field label="Close booking on (optional)">
+              <Input
+                type="date"
+                value={closeJoinDate}
+                onChange={(e) => setCloseJoinDate(e.target.value)}
+                min={new Date().toISOString().split("T")[0]}
+                max={startDate || undefined}
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                After this date, new travelers can&apos;t join.
+              </p>
+              {closeJoinDate &&
+                startDate &&
+                closeJoinDate > startDate && (
+                  <p className="text-[11px] text-destructive mt-1">
+                    Must be on or before the trip start date.
+                  </p>
+                )}
+            </Field>
 
             <Field label="Max group size">
               <div className="flex items-center gap-3">
@@ -996,46 +1074,16 @@ export default function MobileCreateTripPage() {
               </p>
             </div>
 
-            {/* Allow partial payment (installments) */}
-            <div className="rounded-2xl border bg-white p-4 space-y-3">
-              <div className="flex items-start gap-3">
-                <div className="flex-1">
-                  <p className="font-bold text-sm">Allow partial payment</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    Travelers split the price into 3 equal installments
-                    scheduled before the trip starts.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={installmentsEnabled}
-                  onClick={() => setInstallmentsEnabled((v) => !v)}
-                  className={cn(
-                    "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
-                    installmentsEnabled
-                      ? "bg-primary"
-                      : "bg-muted-foreground/25"
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform",
-                      installmentsEnabled
-                        ? "translate-x-5"
-                        : "translate-x-0.5"
-                    )}
-                  />
-                </button>
-              </div>
-
-              {installmentsEnabled && (
-                <InstallmentPreview
-                  totalPerPerson={price}
-                  startDate={startDate}
-                />
-              )}
-            </div>
+            <PartialPaymentCard
+              enabled={installmentsEnabled}
+              onEnabledChange={setInstallmentsEnabled}
+              schedule={paymentSchedule}
+              onScheduleChange={setPaymentSchedule}
+              customSplits={paymentCustomSplits}
+              onCustomSplitsChange={setPaymentCustomSplits}
+              totalPerPerson={price}
+              startDate={startDate}
+            />
 
             {/* Trip policy PDF */}
             <div className="rounded-2xl border bg-white p-4 space-y-3">
@@ -1443,56 +1491,3 @@ function GuestToggle({
   );
 }
 
-function InstallmentPreview({
-  totalPerPerson,
-  startDate,
-}: {
-  totalPerPerson: number;
-  startDate: string;
-}) {
-  if (!startDate) {
-    return (
-      <p className="text-[11px] text-muted-foreground italic">
-        Pick a trip start date to preview the installment schedule.
-      </p>
-    );
-  }
-  if (!installmentsEligible(startDate)) {
-    const days = daysUntilStart(startDate);
-    return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-900">
-        Installments need at least {INSTALLMENTS_MIN_DAYS} days before the trip
-        starts. This trip is {days <= 0 ? "due" : `${days} day${days === 1 ? "" : "s"} away`} —
-        travelers will be asked to pay in full at checkout.
-      </div>
-    );
-  }
-  const schedule = computeInstallments(totalPerPerson, startDate);
-  return (
-    <div className="space-y-2">
-      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-        Per-person schedule
-      </p>
-      {schedule.map((s) => (
-        <div
-          key={s.index}
-          className="rounded-lg border bg-muted/20 p-3 flex items-center gap-3"
-        >
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-[11px] font-bold text-primary shrink-0">
-            {s.index}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold truncate">{s.label}</p>
-            <p className="text-[10px] text-muted-foreground">
-              Due {formatInstallmentDue(s.dueAt)} ·{" "}
-              {Math.round(s.percent * 100)}%
-            </p>
-          </div>
-          <p className="font-bold text-sm shrink-0">
-            ${s.amount.toLocaleString()}
-          </p>
-        </div>
-      ))}
-    </div>
-  );
-}
