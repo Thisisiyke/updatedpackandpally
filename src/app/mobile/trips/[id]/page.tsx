@@ -38,6 +38,10 @@ import {
   calculatePriceBreakdown,
   formatRatePercent,
 } from "@/lib/trip-pricing";
+import {
+  bookingClosedMessage,
+  resolveBookingWindow,
+} from "@/lib/trip-booking-window";
 import { cn } from "@/lib/utils";
 
 export default function MobileTripDetail({
@@ -83,6 +87,14 @@ export default function MobileTripDetail({
 
   const spotsLeft = trip.maxGroupSize - trip.currentBookings;
   const fillPercent = (trip.currentBookings / trip.maxGroupSize) * 100;
+  const bookingWindow = resolveBookingWindow({
+    startDate: trip.startDate,
+    closeJoinDate: trip.closeJoinDate,
+    currentBookings: trip.currentBookings,
+    maxGroupSize: trip.maxGroupSize,
+  });
+  const closedMessage = bookingClosedMessage(bookingWindow);
+  const bookingsBlocked = bookingWindow.status !== "open";
 
   const handleBook = () => {
     setTermsOpen(true);
@@ -471,14 +483,31 @@ export default function MobileTripDetail({
       </div>
 
       {/* Sticky bottom */}
-      <div className="sticky bottom-0 bg-white border-t p-4 md:pb-8 flex items-center gap-3">
-        <div>
-          <p className="text-xl font-bold">${trip.price.toLocaleString()}</p>
-          <p className="text-[10px] text-muted-foreground">per person</p>
+      <div className="sticky bottom-0 bg-white border-t md:pb-8">
+        {closedMessage && (
+          <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-[11px] text-amber-900">
+            <span className="font-semibold">Bookings closed</span> ·{" "}
+            {closedMessage}
+          </div>
+        )}
+        <div className="p-4 flex items-center gap-3">
+          <div>
+            <p className="text-xl font-bold">${trip.price.toLocaleString()}</p>
+            <p className="text-[10px] text-muted-foreground">per person</p>
+          </div>
+          <Button
+            onClick={handleBook}
+            className="flex-1 h-12"
+            size="lg"
+            disabled={bookingsBlocked}
+          >
+            {bookingWindow.status === "closed-by-host"
+              ? "Bookings closed"
+              : bookingWindow.status === "trip-started"
+                ? "Trip started"
+                : "Join this trip"}
+          </Button>
         </div>
-        <Button onClick={handleBook} className="flex-1 h-12" size="lg">
-          Join this trip
-        </Button>
       </div>
 
       {shareToast && (

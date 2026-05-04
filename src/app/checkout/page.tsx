@@ -49,9 +49,13 @@ import {
   computeInstallments,
   installmentsEligible,
   formatInstallmentDue,
-  daysUntilStart,
-  INSTALLMENTS_MIN_DAYS,
+  hoursUntilStart,
+  INSTALLMENTS_MIN_HOURS,
 } from "@/lib/installment-schedule";
+import {
+  bookingClosedMessage,
+  resolveBookingWindow,
+} from "@/lib/trip-booking-window";
 import { trips } from "@/data/trips";
 import { hosts } from "@/data/hosts";
 import type { Trip } from "@/types";
@@ -239,7 +243,9 @@ function CheckoutContent() {
         ? selectedTrip
           ? computeInstallments(
               Math.round(wAmt.GrandFullAmt),
-              selectedTrip.startDate
+              selectedTrip.startDate,
+              selectedTrip.partialPayment?.schedule || "biweekly",
+              selectedTrip.partialPayment?.customSplits
             )[0].amount
           : Math.round(wAmt.GrandFullAmt / 3)
         : wAmt.GrandFullAmt;
@@ -387,7 +393,12 @@ function CheckoutContent() {
     useWanderlyStripe && wAmt ? Math.round(wAmt.GrandFullAmt) : total;
   const installmentSchedule =
     installmentsAllowed && selectedTrip
-      ? computeInstallments(chargedTotal, selectedTrip.startDate)
+      ? computeInstallments(
+          chargedTotal,
+          selectedTrip.startDate,
+          selectedTrip.partialPayment?.schedule || "biweekly",
+          selectedTrip.partialPayment?.customSplits
+        )
       : null;
 
   const amountDueNow =
@@ -398,8 +409,25 @@ function CheckoutContent() {
         : total;
   const amountDueLater =
     type === "trip" && paymentMode === "partial" && installmentSchedule
-      ? installmentSchedule[1].amount + installmentSchedule[2].amount
+      ? installmentSchedule
+          .slice(1)
+          .reduce((sum, s) => sum + s.amount, 0)
       : 0;
+
+  const tripBookingWindow =
+    type === "trip" && selectedTrip
+      ? resolveBookingWindow({
+          startDate: selectedTrip.startDate,
+          closeJoinDate: selectedTrip.closeJoinDate,
+          currentBookings: selectedTrip.currentBookings,
+          maxGroupSize: selectedTrip.maxGroupSize,
+        })
+      : null;
+  const tripBookingsBlocked =
+    !!tripBookingWindow && tripBookingWindow.status !== "open";
+  const tripClosedMessage = tripBookingWindow
+    ? bookingClosedMessage(tripBookingWindow)
+    : null;
 
   const handleStep1Next = () => {
     if (!firstName || !lastName || !email || !phone) return;
@@ -416,6 +444,11 @@ function CheckoutContent() {
 
   const finalizeWanderlyBooking = async (paymentIntentId: string) => {
     if (!selectedTrip?.wanderly || !isPackPallyMember(packUser)) return;
+    if (tripBookingsBlocked) {
+      throw new Error(
+        tripClosedMessage || "Bookings are closed for this trip."
+      );
+    }
     const member = packUser!;
     const body = buildBookTripBody({
       trip: selectedTrip,
@@ -454,6 +487,12 @@ function CheckoutContent() {
 
   const handleConfirm = async () => {
     if (useWanderlyStripe && clientSecret) {
+      return;
+    }
+    if (type === "trip" && tripBookingsBlocked) {
+      setBookingError(
+        tripClosedMessage || "Bookings are closed for this trip."
+      );
       return;
     }
     if (type === "trip" && selectedTrip?.wanderly) {
@@ -634,6 +673,13 @@ function CheckoutContent() {
                   {type === "flight" || type === "trip" ? "traveler" : "guest"}
                   &apos;s information
                 </p>
+
+                {tripClosedMessage && (
+                  <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                    <p className="font-semibold">Bookings closed</p>
+                    <p className="mt-0.5">{tripClosedMessage}</p>
+                  </div>
+                )}
 
                 {type === "trip" && selectedTrip && tripPricing && (
                   <div className="mb-6 rounded-xl bg-primary/5 border border-primary/10 p-4">
@@ -860,12 +906,15 @@ function CheckoutContent() {
                       !lastName ||
                       !email ||
                       !phone ||
+                      tripBookingsBlocked ||
                       (type === "trip" &&
                         !!selectedTrip?.requireTravelerId &&
                         !travelerIdFile)
                     }
                   >
-                    Continue to payment
+                    {tripBookingsBlocked
+                      ? "Bookings closed"
+                      : "Continue to payment"}
                   </Button>
                 </div>
               </div>
@@ -954,15 +1003,16 @@ function CheckoutContent() {
                           Partial payment isn&apos;t available for this trip.
                         </p>
                         <p className="mt-0.5 leading-snug">
-                          The host enabled installments, but this trip is{" "}
+                          The host enabled installments, but this trip starts{" "}
                           {(() => {
-                            const d = daysUntilStart(selectedTrip.startDate);
-                            return d <= 0
-                              ? "due"
-                              : `${d} day${d === 1 ? "" : "s"} away`;
+                            const h = hoursUntilStart(selectedTrip.startDate);
+                            return h <= 0
+                              ? "now"
+                              : `in ${h} hour${h === 1 ? "" : "s"}`;
                           })()}{" "}
-                          — installments need at least {INSTALLMENTS_MIN_DAYS}{" "}
-                          days to schedule. Pay in full to confirm your spot.
+                          — installments aren&apos;t allowed within{" "}
+                          {INSTALLMENTS_MIN_HOURS} hours of trip start. Pay in
+                          full to confirm your spot.
                         </p>
                       </div>
                     )}
@@ -1420,10 +1470,12 @@ function CheckoutContent() {
                     <Button
                       size="lg"
                       onClick={handleConfirm}
-                      disabled={processing}
+                      disabled={processing || tripBookingsBlocked}
                       className="sm:min-w-[200px]"
                     >
-                      {processing ? (
+                      {tripBookingsBlocked ? (
+                        "Bookings closed"
+                      ) : processing ? (
                         "Processing..."
                       ) : (
                         <>

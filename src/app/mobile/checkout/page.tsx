@@ -32,9 +32,13 @@ import {
   computeInstallments,
   installmentsEligible,
   formatInstallmentDue,
-  daysUntilStart,
-  INSTALLMENTS_MIN_DAYS,
+  hoursUntilStart,
+  INSTALLMENTS_MIN_HOURS,
 } from "@/lib/installment-schedule";
+import {
+  bookingClosedMessage,
+  resolveBookingWindow,
+} from "@/lib/trip-booking-window";
 import { trips } from "@/data/trips";
 import { hosts } from "@/data/hosts";
 import { joinTripGroupChat } from "@/hooks/use-conversations";
@@ -188,7 +192,12 @@ function CheckoutContent() {
     !installmentsEligible(selectedTrip.startDate);
   const installmentSchedule =
     installmentsAllowed && selectedTrip
-      ? computeInstallments(total, selectedTrip.startDate)
+      ? computeInstallments(
+          total,
+          selectedTrip.startDate,
+          selectedTrip.partialPayment?.schedule || "biweekly",
+          selectedTrip.partialPayment?.customSplits
+        )
       : null;
 
   const amountDueNow =
@@ -197,8 +206,25 @@ function CheckoutContent() {
       : total;
   const amountDueLater =
     type === "trip" && paymentMode === "partial" && installmentSchedule
-      ? installmentSchedule[1].amount + installmentSchedule[2].amount
+      ? installmentSchedule
+          .slice(1)
+          .reduce((sum, s) => sum + s.amount, 0)
       : 0;
+
+  const tripBookingWindow =
+    type === "trip" && selectedTrip
+      ? resolveBookingWindow({
+          startDate: selectedTrip.startDate,
+          closeJoinDate: selectedTrip.closeJoinDate,
+          currentBookings: selectedTrip.currentBookings,
+          maxGroupSize: selectedTrip.maxGroupSize,
+        })
+      : null;
+  const tripBookingsBlocked =
+    !!tripBookingWindow && tripBookingWindow.status !== "open";
+  const tripClosedMessage = tripBookingWindow
+    ? bookingClosedMessage(tripBookingWindow)
+    : null;
 
   if (!selectedFlight && !selectedHotel && !selectedTrip) {
     return (
@@ -215,6 +241,7 @@ function CheckoutContent() {
   }
 
   const handleConfirm = async () => {
+    if (type === "trip" && tripBookingsBlocked) return;
     setProcessing(true);
     await new Promise((r) => setTimeout(r, 1300));
     const bookingId = `PP${Date.now().toString(36).toUpperCase()}`;
@@ -389,6 +416,13 @@ function CheckoutContent() {
                 Enter details for the primary {type === "flight" ? "traveler" : "guest"}
               </p>
             </div>
+
+            {tripClosedMessage && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-900">
+                <p className="font-semibold">Bookings closed</p>
+                <p className="mt-0.5 leading-snug">{tripClosedMessage}</p>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -728,15 +762,16 @@ function CheckoutContent() {
                         Partial payment isn&apos;t available for this trip.
                       </p>
                       <p className="mt-0.5 leading-snug">
-                        The host enabled installments, but this trip is{" "}
+                        The host enabled installments, but this trip starts{" "}
                         {(() => {
-                          const d = daysUntilStart(selectedTrip.startDate);
-                          return d <= 0
-                            ? "due"
-                            : `${d} day${d === 1 ? "" : "s"} away`;
+                          const h = hoursUntilStart(selectedTrip.startDate);
+                          return h <= 0
+                            ? "now"
+                            : `in ${h} hour${h === 1 ? "" : "s"}`;
                         })()}{" "}
-                        — installments need at least {INSTALLMENTS_MIN_DAYS}{" "}
-                        days to schedule. Pay in full to confirm your spot.
+                        — installments aren&apos;t allowed within{" "}
+                        {INSTALLMENTS_MIN_HOURS} hours of trip start. Pay in
+                        full to confirm your spot.
                       </p>
                     </div>
                   )}
@@ -928,7 +963,8 @@ function CheckoutContent() {
             size="lg"
             onClick={() => setStep((step + 1) as any)}
             disabled={
-              step === 1
+              tripBookingsBlocked ||
+              (step === 1
                 ? !firstName ||
                   !lastName ||
                   !email ||
@@ -936,19 +972,25 @@ function CheckoutContent() {
                   (type === "trip" &&
                     !!selectedTrip?.requireTravelerId &&
                     !travelerIdFile)
-                : !cardNumber || !cardName || !expiry || !cvc
+                : !cardNumber || !cardName || !expiry || !cvc)
             }
           >
-            {step === 1 ? "Continue to payment" : "Review booking"}
+            {tripBookingsBlocked
+              ? "Bookings closed"
+              : step === 1
+                ? "Continue to payment"
+                : "Review booking"}
           </Button>
         ) : (
           <Button
             className="w-full h-12 gap-2"
             size="lg"
             onClick={handleConfirm}
-            disabled={processing}
+            disabled={processing || tripBookingsBlocked}
           >
-            {processing ? (
+            {tripBookingsBlocked ? (
+              "Bookings closed"
+            ) : processing ? (
               "Processing..."
             ) : (
               <>

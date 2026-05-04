@@ -27,13 +27,15 @@ export function buildBookTripBody(input: {
   );
   const isPartial = input.paymentMode === "partial";
 
-  // Partial = pay in 3 equal installments. Today's Stripe charge is
-  // installment 1 (≈ 1/3 of grand total); installments 2 + 3 are collected
-  // later via the existing paylater cron, summed into `amountToPay`.
+  // Partial = pay in N installments based on the host's chosen schedule.
+  // `installmentPlan` is stored on the booking so travelers can adjust due
+  // dates (not amounts) for unpaid installments after checkout.
   const installmentSchedule = isPartial
     ? computeInstallments(
         Math.round(math.GrandFullAmt),
-        input.trip.startDate
+        input.trip.startDate,
+        input.trip.partialPayment?.schedule || "biweekly",
+        input.trip.partialPayment?.customSplits
       )
     : null;
   const charge = installmentSchedule
@@ -41,7 +43,10 @@ export function buildBookTripBody(input: {
     : math.GrandFullAmt;
   const scheduleDateToPay = schedulePayDateOneWeekBefore(input.trip.startDate);
   const amountToPay = installmentSchedule
-    ? (installmentSchedule[1].amount + installmentSchedule[2].amount).toFixed(2)
+    ? installmentSchedule
+        .slice(1)
+        .reduce((sum, s) => sum + s.amount, 0)
+        .toFixed(2)
     : "0";
 
   // Service fee + tax on the partial leg are scaled to installment 1's share
@@ -53,6 +58,17 @@ export function buildBookTripBody(input: {
     (math.fullAmtServiceFee * partialShare).toFixed(2)
   );
   const partialTax = Number((math.fullAmtTax * partialShare).toFixed(2));
+
+  const installmentPlan =
+    isPartial && installmentSchedule && installmentSchedule.length > 0
+      ? {
+          installments: installmentSchedule.map((s) => ({
+            index: s.index,
+            amount: s.amount,
+            dueAt: s.dueAt,
+          })),
+        }
+      : undefined;
 
   return {
     amountPaid: [
@@ -87,6 +103,7 @@ export function buildBookTripBody(input: {
     endDate: input.trip.endDate,
     scheduleDateToPay,
     amountToPay,
+    ...(installmentPlan ? { installmentPlan } : {}),
     mobile: input.mobile.replace(/\D/g, ""),
     refundBeforeDays: "60",
     refundDescription: "Full refund 60+ days before trip; 5% fee < 60 days; 20% fee < 48 hours. Host cancellation = full refund.",

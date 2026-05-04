@@ -23,14 +23,20 @@ export interface PartnerTrip {
   taxRate?: number;
   /**
    * Host opt-in: when enabled, travelers see a "Pay partial payment" option
-   * at checkout that splits the total into 3 equal installments scheduled
-   * from the trip's start date. This is an installment plan, not a discount.
+   * at checkout that splits the total across multiple installments. Strategy
+   * controls how dates/amounts are derived (biweekly / weekly / custom).
+   * This is an installment plan, not a discount.
    */
   partialPayment?: {
     enabled: boolean;
-    /** 3-tuple of decimals summing to 1. Defaults to equal thirds. */
-    splits: [number, number, number];
+    schedule?: "biweekly" | "weekly" | "custom";
+    customSplits?: { dueAt: string; percent: number }[];
   };
+  /**
+   * Optional ISO date (YYYY-MM-DD). After this date, new bookings are
+   * blocked at checkout. Should be on/before `startDate`.
+   */
+  closeJoinDate?: string;
   /** Host opt-in: travelers must upload a government ID at checkout. */
   requireTravelerId?: boolean;
   /** Host opt-in: travelers see an optional social-media profile input. */

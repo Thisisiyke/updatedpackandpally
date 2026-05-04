@@ -1,5 +1,8 @@
 import type { Trip } from "@/types";
-import { DEFAULT_INSTALLMENT_SPLITS } from "@/lib/installment-schedule";
+import type {
+  CustomSplit,
+  PaymentSchedule,
+} from "@/lib/installment-schedule";
 
 const COUNTRY_TO_CONTINENT: Record<string, string> = {
   Italy: "Europe",
@@ -81,6 +84,12 @@ export type WanderlyTripRecord = {
   nights?: string;
   mornings?: string;
   paylater?: string | boolean;
+  /** "biweekly" | "weekly" | "custom" — defaults to "biweekly" when absent. */
+  paymentSchedule?: string;
+  /** JSON string or array of {dueAt, percent} when paymentSchedule = custom. */
+  paymentCustomSplits?: string | CustomSplit[];
+  /** Host close-join date (ISO YYYY-MM-DD) — bookings stop after this date. */
+  closeJoinDate?: string;
   latitude?: string | number;
   longitude?: string | number;
 };
@@ -140,6 +149,32 @@ export function wanderlyTripToUiTrip(raw: WanderlyTripRecord): Trip {
   const partialEnabled =
     raw.paylater === true || raw.paylater === "true";
 
+  const paymentSchedule: PaymentSchedule = (() => {
+    const v = raw.paymentSchedule;
+    if (v === "weekly" || v === "biweekly" || v === "custom") return v;
+    return "biweekly";
+  })();
+
+  let customSplits: CustomSplit[] | undefined;
+  if (paymentSchedule === "custom" && raw.paymentCustomSplits) {
+    try {
+      const parsed =
+        typeof raw.paymentCustomSplits === "string"
+          ? JSON.parse(raw.paymentCustomSplits)
+          : raw.paymentCustomSplits;
+      if (Array.isArray(parsed)) {
+        customSplits = parsed
+          .map((s) => ({
+            dueAt: String(s?.dueAt || ""),
+            percent: Number(s?.percent || 0),
+          }))
+          .filter((s) => s.dueAt && s.percent > 0);
+      }
+    } catch {
+      customSplits = undefined;
+    }
+  }
+
   return {
     id,
     title,
@@ -170,8 +205,16 @@ export function wanderlyTripToUiTrip(raw: WanderlyTripRecord): Trip {
     status: tripStatus(booked, maxGuests),
     taxRate: 0.0825,
     partialPayment: partialEnabled
-      ? { enabled: true, splits: DEFAULT_INSTALLMENT_SPLITS }
+      ? {
+          enabled: true,
+          schedule: paymentSchedule,
+          ...(customSplits ? { customSplits } : {}),
+        }
       : undefined,
+    closeJoinDate:
+      typeof raw.closeJoinDate === "string" && raw.closeJoinDate
+        ? raw.closeJoinDate
+        : undefined,
     wanderly: {
       _id: raw._id,
       timestamp: raw.timestamp,

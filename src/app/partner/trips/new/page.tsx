@@ -51,13 +51,8 @@ import {
 import { hostNeedsStripeConnect } from "@/lib/host-needs-stripe-connect";
 import { StripeRequiredForCreate } from "@/components/partner/stripe-required-for-create";
 import { DestinationPlaceField } from "@/components/partner/destination-place-field";
-import {
-  computeInstallments,
-  daysUntilStart,
-  formatInstallmentDue,
-  installmentsEligible,
-  INSTALLMENTS_MIN_DAYS,
-} from "@/lib/installment-schedule";
+import { PartialPaymentCard } from "@/components/partner/partial-payment-card";
+import type { CustomSplit, PaymentSchedule } from "@/lib/installment-schedule";
 import type { Trip } from "@/types";
 
 const steps = [
@@ -111,6 +106,7 @@ export default function NewTripPage() {
   const [endDate, setEndDate] = useState(
     new Date(Date.now() + 37 * 86400000).toISOString().split("T")[0]
   );
+  const [closeJoinDate, setCloseJoinDate] = useState("");
   const [maxGroupSize, setMaxGroupSize] = useState(12);
 
   // Step 3 — Itinerary + highlights
@@ -142,6 +138,11 @@ export default function NewTripPage() {
   const [priceGroupOf3, setPriceGroupOf3] = useState(1899);
   const [taxRatePct, setTaxRatePct] = useState("8.25"); // percent; stored as decimal on save
   const [installmentsEnabled, setInstallmentsEnabled] = useState(false);
+  const [paymentSchedule, setPaymentSchedule] =
+    useState<PaymentSchedule>("biweekly");
+  const [paymentCustomSplits, setPaymentCustomSplits] = useState<CustomSplit[]>(
+    []
+  );
 
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [galleryFiles, setGalleryFiles] = useState<File[]>([]);
@@ -188,6 +189,7 @@ export default function NewTripPage() {
         const end = trip.endDate.slice(0, 10);
         setStartDate(start);
         setEndDate(end >= start ? end : start);
+        setCloseJoinDate(trip.closeJoinDate?.slice(0, 10) || "");
 
         setMaxGroupSize(Math.max(1, trip.maxGroupSize));
 
@@ -299,6 +301,9 @@ export default function NewTripPage() {
 
   /** YYYY-MM-DD end must be on or after start. */
   const datesValid = Boolean(startDate && endDate && endDate >= startDate);
+  /** Close-join date is optional; when set it must be on/before start. */
+  const closeJoinDateValid =
+    !closeJoinDate || (startDate ? closeJoinDate <= startDate : true);
   const itineraryMatchesTripLength =
     datesValid && itinerary.length === duration;
 
@@ -306,7 +311,7 @@ export default function NewTripPage() {
     if (step === 1)
       return title && destination && country && description && categories.length > 0;
     if (step === 2) {
-      return datesValid && maxGroupSize > 0;
+      return datesValid && closeJoinDateValid && maxGroupSize > 0;
     }
     if (step === 3) {
       return (
@@ -475,6 +480,18 @@ export default function NewTripPage() {
     form.append("longitude", placeLng != null ? String(placeLng) : "0");
     form.append("otherTripName", "");
     form.append("paylater", String(installmentsEnabled));
+    if (installmentsEnabled) {
+      form.append("paymentSchedule", paymentSchedule);
+      if (paymentSchedule === "custom") {
+        form.append(
+          "paymentCustomSplits",
+          JSON.stringify(paymentCustomSplits)
+        );
+      }
+    }
+    if (closeJoinDate) {
+      form.append("closeJoinDate", closeJoinDate);
+    }
 
     form.append("tripImages", coverFile);
     galleryFiles.slice(0, 7).forEach((f) => form.append("tripImages", f));
@@ -775,6 +792,43 @@ export default function NewTripPage() {
                 {startDate && endDate && endDate < startDate && (
                   <p className="text-xs text-destructive mt-2">
                     End date must be on or after the start date.
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>
+                    Close booking on{" "}
+                    <span className="text-muted-foreground font-normal">
+                      (optional)
+                    </span>
+                  </Label>
+                  {closeJoinDate && (
+                    <button
+                      type="button"
+                      onClick={() => setCloseJoinDate("")}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <Input
+                  type="date"
+                  value={closeJoinDate}
+                  onChange={(e) => setCloseJoinDate(e.target.value)}
+                  min={new Date().toISOString().split("T")[0]}
+                  max={startDate}
+                />
+                <p className="text-xs text-muted-foreground">
+                  After this date, new travelers can&apos;t join. Leave blank to
+                  accept bookings until the trip starts.
+                </p>
+                {closeJoinDate && !closeJoinDateValid && (
+                  <p className="text-xs text-destructive">
+                    Close-booking date must be on or before the trip start
+                    date.
                   </p>
                 )}
               </div>
@@ -1442,48 +1496,16 @@ export default function NewTripPage() {
                 </p>
               </div>
 
-              {/* Allow partial payment (installments) */}
-              <div className="rounded-xl border bg-white p-4 space-y-3">
-                <div className="flex items-start gap-3">
-                  <div className="flex-1">
-                    <Label className="text-sm font-bold">
-                      Allow partial payment
-                    </Label>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">
-                      Travelers split the price into 3 equal installments
-                      scheduled before the trip starts.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={installmentsEnabled}
-                    onClick={() => setInstallmentsEnabled((v) => !v)}
-                    className={cn(
-                      "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
-                      installmentsEnabled
-                        ? "bg-primary"
-                        : "bg-muted-foreground/25"
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform",
-                        installmentsEnabled
-                          ? "translate-x-5"
-                          : "translate-x-0.5"
-                      )}
-                    />
-                  </button>
-                </div>
-
-                {installmentsEnabled && (
-                  <InstallmentPreview
-                    totalPerPerson={useTieredPricing ? priceSolo : price}
-                    startDate={startDate}
-                  />
-                )}
-              </div>
+              <PartialPaymentCard
+                enabled={installmentsEnabled}
+                onEnabledChange={setInstallmentsEnabled}
+                schedule={paymentSchedule}
+                onScheduleChange={setPaymentSchedule}
+                customSplits={paymentCustomSplits}
+                onCustomSplitsChange={setPaymentCustomSplits}
+                totalPerPerson={useTieredPricing ? priceSolo : price}
+                startDate={startDate}
+              />
 
               <div className="rounded-xl bg-primary/5 border border-primary/10 p-5">
                 <p className="text-sm font-semibold mb-4">
@@ -1736,57 +1758,3 @@ export default function NewTripPage() {
   );
 }
 
-function InstallmentPreview({
-  totalPerPerson,
-  startDate,
-}: {
-  totalPerPerson: number;
-  startDate: string;
-}) {
-  if (!startDate) {
-    return (
-      <p className="text-[11px] text-muted-foreground italic">
-        Pick a trip start date to preview the installment schedule.
-      </p>
-    );
-  }
-  if (!installmentsEligible(startDate)) {
-    const days = daysUntilStart(startDate);
-    return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-900">
-        Installments need at least {INSTALLMENTS_MIN_DAYS} days before the trip
-        starts. This trip is{" "}
-        {days <= 0 ? "due" : `${days} day${days === 1 ? "" : "s"} away`} —
-        travelers will be asked to pay in full at checkout.
-      </div>
-    );
-  }
-  const schedule = computeInstallments(totalPerPerson, startDate);
-  return (
-    <div className="space-y-2">
-      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-        Per-person schedule
-      </p>
-      {schedule.map((s) => (
-        <div
-          key={s.index}
-          className="rounded-lg border bg-muted/20 p-3 flex items-center gap-3"
-        >
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-[11px] font-bold text-primary shrink-0">
-            {s.index}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold truncate">{s.label}</p>
-            <p className="text-[10px] text-muted-foreground">
-              Due {formatInstallmentDue(s.dueAt)} ·{" "}
-              {Math.round(s.percent * 100)}%
-            </p>
-          </div>
-          <p className="font-bold text-sm shrink-0">
-            ${s.amount.toLocaleString()}
-          </p>
-        </div>
-      ))}
-    </div>
-  );
-}
