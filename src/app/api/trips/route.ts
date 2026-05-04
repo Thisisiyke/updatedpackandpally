@@ -29,7 +29,7 @@ export async function GET(req: Request) {
   } catch (e) {
     console.error(e);
     return NextResponse.json(
-      { error: "Failed to load trips. Is WANDERLY_API_BASE_URL set and wanderly-1 running?" },
+      { error: "Failed to load trips. Is API_BASE_URL set and wanderly-1 running?" },
       { status: 502 }
     );
   }

@@ -21,7 +21,7 @@ export async function POST(req: Request) {
       });
     } catch {
       return NextResponse.json(
-        { error: "Cannot reach the API. Check WANDERLY_API_BASE_URL and your network." },
+        { error: "Cannot reach the API. Check API_BASE_URL and your network." },
         { status: 503 }
       );
     }
