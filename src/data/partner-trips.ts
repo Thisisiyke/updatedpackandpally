@@ -22,9 +22,9 @@ export interface PartnerTrip {
   /** Decimal (e.g. 0.0825 for 8.25%). Platform default 8.25% if unset. */
   taxRate?: number;
   /**
-   * Host opt-in: when enabled, travelers see a 3-installment schedule at
-   * checkout instead of the platform 30%-deposit option. The schedule is
-   * computed from the trip's start date.
+   * Host opt-in: when enabled, travelers see a "Pay partial payment" option
+   * at checkout that splits the total into 3 equal installments scheduled
+   * from the trip's start date. This is an installment plan, not a discount.
    */
   partialPayment?: {
     enabled: boolean;

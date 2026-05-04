@@ -1,4 +1,5 @@
 import type { Trip } from "@/types";
+import { DEFAULT_INSTALLMENT_SPLITS } from "@/lib/installment-schedule";
 
 const COUNTRY_TO_CONTINENT: Record<string, string> = {
   Italy: "Europe",
@@ -136,6 +137,9 @@ export function wanderlyTripToUiTrip(raw: WanderlyTripRecord): Trip {
     !Number.isNaN(latNum) &&
     !Number.isNaN(lngNum);
 
+  const partialEnabled =
+    raw.paylater === true || raw.paylater === "true";
+
   return {
     id,
     title,
@@ -165,6 +169,9 @@ export function wanderlyTripToUiTrip(raw: WanderlyTripRecord): Trip {
     notIncluded: raw.whatsNotIncluded || [],
     status: tripStatus(booked, maxGuests),
     taxRate: 0.0825,
+    partialPayment: partialEnabled
+      ? { enabled: true, splits: DEFAULT_INSTALLMENT_SPLITS }
+      : undefined,
     wanderly: {
       _id: raw._id,
       timestamp: raw.timestamp,

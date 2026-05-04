@@ -3,6 +3,7 @@ import {
   wanderlyBookingAmounts,
   schedulePayDateOneWeekBefore,
 } from "@/lib/wanderly-booking-math";
+import { computeInstallments } from "@/lib/installment-schedule";
 
 export function buildBookTripBody(input: {
   trip: Trip;
@@ -25,11 +26,33 @@ export function buildBookTripBody(input: {
     input.travelers
   );
   const isPartial = input.paymentMode === "partial";
-  const charge = isPartial ? math.GrandpartialAmt : math.GrandFullAmt;
+
+  // Partial = pay in 3 equal installments. Today's Stripe charge is
+  // installment 1 (≈ 1/3 of grand total); installments 2 + 3 are collected
+  // later via the existing paylater cron, summed into `amountToPay`.
+  const installmentSchedule = isPartial
+    ? computeInstallments(
+        Math.round(math.GrandFullAmt),
+        input.trip.startDate
+      )
+    : null;
+  const charge = installmentSchedule
+    ? installmentSchedule[0].amount
+    : math.GrandFullAmt;
   const scheduleDateToPay = schedulePayDateOneWeekBefore(input.trip.startDate);
-  const amountToPay = isPartial
-    ? (math.GrandFullAmt - math.GrandpartialAmt).toFixed(2)
+  const amountToPay = installmentSchedule
+    ? (installmentSchedule[1].amount + installmentSchedule[2].amount).toFixed(2)
     : "0";
+
+  // Service fee + tax on the partial leg are scaled to installment 1's share
+  // of the full amount so percentages stay consistent with the new schedule.
+  const partialShare = installmentSchedule
+    ? installmentSchedule[0].amount / Math.round(math.GrandFullAmt)
+    : 0;
+  const partialServiceFee = Number(
+    (math.fullAmtServiceFee * partialShare).toFixed(2)
+  );
+  const partialTax = Number((math.fullAmtTax * partialShare).toFixed(2));
 
   return {
     amountPaid: [
@@ -37,8 +60,8 @@ export function buildBookTripBody(input: {
         installment1: charge,
         paymentId: input.paymentIntentId,
         customerId: input.customerId || "",
-        serviceFee: isPartial ? math.partialAmtServiceFee : math.fullAmtServiceFee,
-        taxFee: isPartial ? math.partialAmtTax : math.fullAmtTax,
+        serviceFee: isPartial ? partialServiceFee : math.fullAmtServiceFee,
+        taxFee: isPartial ? partialTax : math.fullAmtTax,
       },
     ],
     tripId: w._id,
@@ -59,8 +82,8 @@ export function buildBookTripBody(input: {
     nights: w.nights || String(Math.max(0, input.trip.durationDays - 1)),
     mornings: w.mornings || String(input.trip.durationDays),
     userProfileImg: input.userProfileImg || "",
-    serviceFee: isPartial ? math.partialAmtServiceFee : math.fullAmtServiceFee,
-    taxFee: isPartial ? math.partialAmtTax : math.fullAmtTax,
+    serviceFee: isPartial ? partialServiceFee : math.fullAmtServiceFee,
+    taxFee: isPartial ? partialTax : math.fullAmtTax,
     endDate: input.trip.endDate,
     scheduleDateToPay,
     amountToPay,

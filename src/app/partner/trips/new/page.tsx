@@ -51,6 +51,13 @@ import {
 import { hostNeedsStripeConnect } from "@/lib/host-needs-stripe-connect";
 import { StripeRequiredForCreate } from "@/components/partner/stripe-required-for-create";
 import { DestinationPlaceField } from "@/components/partner/destination-place-field";
+import {
+  computeInstallments,
+  daysUntilStart,
+  formatInstallmentDue,
+  installmentsEligible,
+  INSTALLMENTS_MIN_DAYS,
+} from "@/lib/installment-schedule";
 import type { Trip } from "@/types";
 
 const steps = [
@@ -134,6 +141,7 @@ export default function NewTripPage() {
   const [priceCouple, setPriceCouple] = useState(2199);
   const [priceGroupOf3, setPriceGroupOf3] = useState(1899);
   const [taxRatePct, setTaxRatePct] = useState("8.25"); // percent; stored as decimal on save
+  const [installmentsEnabled, setInstallmentsEnabled] = useState(false);
 
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [galleryFiles, setGalleryFiles] = useState<File[]>([]);
@@ -466,7 +474,7 @@ export default function NewTripPage() {
     form.append("latitude", placeLat != null ? String(placeLat) : "0");
     form.append("longitude", placeLng != null ? String(placeLng) : "0");
     form.append("otherTripName", "");
-    form.append("paylater", "false");
+    form.append("paylater", String(installmentsEnabled));
 
     form.append("tripImages", coverFile);
     galleryFiles.slice(0, 7).forEach((f) => form.append("tripImages", f));
@@ -1434,6 +1442,49 @@ export default function NewTripPage() {
                 </p>
               </div>
 
+              {/* Allow partial payment (installments) */}
+              <div className="rounded-xl border bg-white p-4 space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="flex-1">
+                    <Label className="text-sm font-bold">
+                      Allow partial payment
+                    </Label>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Travelers split the price into 3 equal installments
+                      scheduled before the trip starts.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={installmentsEnabled}
+                    onClick={() => setInstallmentsEnabled((v) => !v)}
+                    className={cn(
+                      "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+                      installmentsEnabled
+                        ? "bg-primary"
+                        : "bg-muted-foreground/25"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform",
+                        installmentsEnabled
+                          ? "translate-x-5"
+                          : "translate-x-0.5"
+                      )}
+                    />
+                  </button>
+                </div>
+
+                {installmentsEnabled && (
+                  <InstallmentPreview
+                    totalPerPerson={useTieredPricing ? priceSolo : price}
+                    startDate={startDate}
+                  />
+                )}
+              </div>
+
               <div className="rounded-xl bg-primary/5 border border-primary/10 p-5">
                 <p className="text-sm font-semibold mb-4">
                   Your potential earnings
@@ -1681,6 +1732,61 @@ export default function NewTripPage() {
           setStep(1);
         }}
       />
+    </div>
+  );
+}
+
+function InstallmentPreview({
+  totalPerPerson,
+  startDate,
+}: {
+  totalPerPerson: number;
+  startDate: string;
+}) {
+  if (!startDate) {
+    return (
+      <p className="text-[11px] text-muted-foreground italic">
+        Pick a trip start date to preview the installment schedule.
+      </p>
+    );
+  }
+  if (!installmentsEligible(startDate)) {
+    const days = daysUntilStart(startDate);
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-900">
+        Installments need at least {INSTALLMENTS_MIN_DAYS} days before the trip
+        starts. This trip is{" "}
+        {days <= 0 ? "due" : `${days} day${days === 1 ? "" : "s"} away`} —
+        travelers will be asked to pay in full at checkout.
+      </div>
+    );
+  }
+  const schedule = computeInstallments(totalPerPerson, startDate);
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+        Per-person schedule
+      </p>
+      {schedule.map((s) => (
+        <div
+          key={s.index}
+          className="rounded-lg border bg-muted/20 p-3 flex items-center gap-3"
+        >
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-[11px] font-bold text-primary shrink-0">
+            {s.index}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold truncate">{s.label}</p>
+            <p className="text-[10px] text-muted-foreground">
+              Due {formatInstallmentDue(s.dueAt)} ·{" "}
+              {Math.round(s.percent * 100)}%
+            </p>
+          </div>
+          <p className="font-bold text-sm shrink-0">
+            ${s.amount.toLocaleString()}
+          </p>
+        </div>
+      ))}
     </div>
   );
 }

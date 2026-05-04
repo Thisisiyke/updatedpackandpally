@@ -40,11 +40,8 @@ import {
   calculateNights,
 } from "@/lib/inventory/hotels";
 import {
-  depositAmount,
-  remainingAmount,
   tripTotal,
   perPersonRate,
-  DEPOSIT_PERCENT,
   calculatePriceBreakdown,
   formatRatePercent,
 } from "@/lib/trip-pricing";
@@ -234,8 +231,18 @@ function CheckoutContent() {
     if (step !== 3 || !useWanderlyStripe || !wAmt || !firstName || !email) {
       return;
     }
+    // Partial mode charges installment 1 today (1/3 of grand total). Full
+    // charges the entire grand total. Both rounded to whole dollars to match
+    // the installment scheduler and the order summary.
     const amount =
-      paymentMode === "partial" ? wAmt.GrandpartialAmt : wAmt.GrandFullAmt;
+      paymentMode === "partial"
+        ? selectedTrip
+          ? computeInstallments(
+              Math.round(wAmt.GrandFullAmt),
+              selectedTrip.startDate
+            )[0].amount
+          : Math.round(wAmt.GrandFullAmt / 3)
+        : wAmt.GrandFullAmt;
     let cancelled = false;
     fetch("/api/bookings/payment-intent", {
       method: "POST",
@@ -271,6 +278,7 @@ function CheckoutContent() {
     firstName,
     lastName,
     email,
+    selectedTrip,
     selectedTrip?.wanderly?._id,
     selectedTrip?.wanderly?.timestamp,
   ]);
@@ -372,40 +380,26 @@ function CheckoutContent() {
     !!selectedTrip?.partialPayment?.enabled &&
     !!selectedTrip &&
     !installmentsEligible(selectedTrip.startDate);
+  // Use the actually-charged grand total when present (Wanderly Stripe path
+  // computes its own service-fee math). Otherwise fall back to the displayed
+  // breakdown total.
+  const chargedTotal =
+    useWanderlyStripe && wAmt ? Math.round(wAmt.GrandFullAmt) : total;
   const installmentSchedule =
     installmentsAllowed && selectedTrip
-      ? computeInstallments(total, selectedTrip.startDate)
+      ? computeInstallments(chargedTotal, selectedTrip.startDate)
       : null;
 
-  // Wanderly Stripe trips use backend pricing math; others use installments or the platform deposit model.
-  const wanderlyPartialDueNow = wAmt ? wAmt.GrandpartialAmt : null;
-  const wanderlyPartialDueLater = wAmt
-    ? Number((wAmt.GrandFullAmt - wAmt.GrandpartialAmt).toFixed(2))
-    : null;
-
   const amountDueNow =
-    type === "trip" && paymentMode === "partial"
-      ? useWanderlyStripe && wanderlyPartialDueNow !== null
-        ? wanderlyPartialDueNow
-        : installmentSchedule
-          ? installmentSchedule[0].amount
-          : depositAmount(total)
+    type === "trip" && paymentMode === "partial" && installmentSchedule
+      ? installmentSchedule[0].amount
       : useWanderlyStripe && wAmt
         ? wAmt.GrandFullAmt
         : total;
   const amountDueLater =
-    type === "trip" && paymentMode === "partial"
-      ? useWanderlyStripe && wanderlyPartialDueLater !== null
-        ? wanderlyPartialDueLater
-        : installmentSchedule
-          ? installmentSchedule[1].amount + installmentSchedule[2].amount
-          : remainingAmount(total)
+    type === "trip" && paymentMode === "partial" && installmentSchedule
+      ? installmentSchedule[1].amount + installmentSchedule[2].amount
       : 0;
-
-  const depositPctLabel = useWanderlyStripe ? 20 : Math.round(DEPOSIT_PERCENT * 100);
-  const remainingDueCopy = useWanderlyStripe
-    ? "1 week before departure"
-    : "30 days before departure";
 
   const handleStep1Next = () => {
     if (!firstName || !lastName || !email || !phone) return;
@@ -923,34 +917,7 @@ function CheckoutContent() {
                           One charge today — you&apos;re all set
                         </p>
                       </button>
-                      {useWanderlyStripe ? (
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMode("partial")}
-                        className={cn(
-                          "rounded-xl border p-4 text-left transition-all",
-                          paymentMode === "partial"
-                            ? "border-primary bg-primary/5 ring-2 ring-primary/20"
-                            : "border-muted hover:border-primary/40"
-                        )}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-semibold text-sm">
-                            Pay {depositPctLabel}% deposit
-                          </span>
-                          {paymentMode === "partial" && (
-                            <Check className="h-4 w-4 text-primary" />
-                          )}
-                        </div>
-                        <p className="text-xl font-bold">
-                          ${amountDueNow.toLocaleString()}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          ${(wanderlyPartialDueLater ?? remainingAmount(total)).toLocaleString()} due{" "}
-                          {remainingDueCopy}
-                        </p>
-                      </button>
-                      ) : installmentsAllowed && installmentSchedule ? (
+                      {installmentsAllowed && installmentSchedule ? (
                         <button
                           type="button"
                           onClick={() => setPaymentMode("partial")}
@@ -963,7 +930,7 @@ function CheckoutContent() {
                         >
                           <div className="flex items-center justify-between mb-1">
                             <span className="font-semibold text-sm">
-                              3 installments
+                              Pay partial payment
                             </span>
                             {paymentMode === "partial" && (
                               <Check className="h-4 w-4 text-primary" />
@@ -974,34 +941,8 @@ function CheckoutContent() {
                             today
                           </p>
                           <p className="text-xs text-muted-foreground mt-1">
-                            Split into 3 equal payments — full schedule below
-                          </p>
-                        </button>
-                      ) : !installmentsBlocked ? (
-                        <button
-                          type="button"
-                          onClick={() => setPaymentMode("partial")}
-                          className={cn(
-                            "rounded-xl border p-4 text-left transition-all",
-                            paymentMode === "partial"
-                              ? "border-primary bg-primary/5 ring-2 ring-primary/20"
-                              : "border-muted hover:border-primary/40"
-                          )}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-semibold text-sm">
-                              Pay {Math.round(DEPOSIT_PERCENT * 100)}% deposit
-                            </span>
-                            {paymentMode === "partial" && (
-                              <Check className="h-4 w-4 text-primary" />
-                            )}
-                          </div>
-                          <p className="text-xl font-bold">
-                            ${depositAmount(total).toLocaleString()}
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            ${remainingAmount(total).toLocaleString()} due 30 days
-                            before departure
+                            Split into 3 equal installments — full schedule
+                            below
                           </p>
                         </button>
                       ) : null}
@@ -1369,17 +1310,17 @@ function CheckoutContent() {
                       <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-3">
                         <p className="text-xs font-semibold text-amber-900 flex items-center gap-1.5">
                           <Wallet className="h-3.5 w-3.5" />
-                          Partial payment plan — {depositPctLabel}% deposit
+                          Partial payment plan — 3 installments
                         </p>
                         <div className="mt-2 space-y-1 text-xs text-amber-900/80">
                           <div className="flex items-center justify-between">
-                            <span>Deposit due today</span>
+                            <span>First installment due today</span>
                             <span className="font-semibold">
                               ${amountDueNow.toLocaleString()}
                             </span>
                           </div>
                           <div className="flex items-center justify-between">
-                            <span>Remaining ({remainingDueCopy})</span>
+                            <span>Remaining (2 installments)</span>
                             <span className="font-semibold">
                               ${amountDueLater.toLocaleString()}
                             </span>
@@ -1424,7 +1365,7 @@ function CheckoutContent() {
                           <WanderlyConfirmPaymentButton
                             label={
                               type === "trip" && paymentMode === "partial"
-                                ? `Pay deposit ${formatHotelPrice(amountDueNow)}`
+                                ? `Pay first installment ${formatHotelPrice(amountDueNow)}`
                                 : `Pay ${formatHotelPrice(amountDueNow)}`
                             }
                             disabled={processing}
@@ -1488,7 +1429,7 @@ function CheckoutContent() {
                         <>
                           <Lock className="h-4 w-4" />
                           {type === "trip" && paymentMode === "partial"
-                            ? `Pay deposit ${formatHotelPrice(amountDueNow)}`
+                            ? `Pay first installment ${formatHotelPrice(amountDueNow)}`
                             : `Confirm and pay ${formatHotelPrice(total)}`}
                         </>
                       )}

@@ -23,11 +23,8 @@ import { MobileHeader } from "@/components/mobile/mobile-header";
 import { generateFlights, formatDuration, formatPrice } from "@/lib/flight-generator";
 import { generateHotels, calculateNights, formatHotelPrice } from "@/lib/hotel-generator";
 import {
-  depositAmount,
-  remainingAmount,
   tripTotal,
   perPersonRate,
-  DEPOSIT_PERCENT,
   calculatePriceBreakdown,
   formatRatePercent,
 } from "@/lib/trip-pricing";
@@ -195,16 +192,12 @@ function CheckoutContent() {
       : null;
 
   const amountDueNow =
-    type === "trip" && paymentMode === "partial"
-      ? installmentSchedule
-        ? installmentSchedule[0].amount
-        : depositAmount(total)
+    type === "trip" && paymentMode === "partial" && installmentSchedule
+      ? installmentSchedule[0].amount
       : total;
   const amountDueLater =
-    type === "trip" && paymentMode === "partial"
-      ? installmentSchedule
-        ? installmentSchedule[1].amount + installmentSchedule[2].amount
-        : remainingAmount(total)
+    type === "trip" && paymentMode === "partial" && installmentSchedule
+      ? installmentSchedule[1].amount + installmentSchedule[2].amount
       : 0;
 
   if (!selectedFlight && !selectedHotel && !selectedTrip) {
@@ -687,14 +680,16 @@ function CheckoutContent() {
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-bold">3 installments</p>
+                          <p className="text-sm font-bold">
+                            Pay partial payment
+                          </p>
                           <span className="text-sm font-bold">
                             ${installmentSchedule[0].amount.toLocaleString()}{" "}
                             today
                           </span>
                         </div>
                         <p className="text-[10px] text-muted-foreground">
-                          Split into 3 equal payments — see schedule below.
+                          Split into 3 equal installments — see schedule below.
                         </p>
                         {paymentMode === "partial" && (
                           <div className="mt-3 space-y-1.5">
@@ -723,47 +718,6 @@ function CheckoutContent() {
                             ))}
                           </div>
                         )}
-                      </div>
-                    </button>
-                  ) : !installmentsBlocked ? (
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMode("partial")}
-                      className={cn(
-                        "w-full flex items-start gap-3 rounded-xl border p-3 text-left transition-all",
-                        paymentMode === "partial"
-                          ? "border-primary ring-2 ring-primary/20 bg-primary/5"
-                          : "hover:bg-muted/30"
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          "flex h-5 w-5 items-center justify-center rounded-full border-2 shrink-0 mt-0.5",
-                          paymentMode === "partial"
-                            ? "border-primary bg-primary"
-                            : "border-muted-foreground/30"
-                        )}
-                      >
-                        {paymentMode === "partial" && (
-                          <div className="h-2 w-2 rounded-full bg-white" />
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-bold">
-                            Pay {Math.round(DEPOSIT_PERCENT * 100)}% deposit
-                          </p>
-                          <span className="text-sm font-bold">
-                            ${depositAmount(total).toLocaleString()}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-muted-foreground">
-                          Remaining{" "}
-                          <span className="font-semibold">
-                            ${remainingAmount(total).toLocaleString()}
-                          </span>{" "}
-                          due 30 days before the trip
-                        </p>
                       </div>
                     </button>
                   ) : null}
@@ -917,9 +871,12 @@ function CheckoutContent() {
                 </div>
                 {type === "trip" && paymentMode === "partial" && (
                   <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-3 space-y-1.5">
+                    <p className="text-[11px] font-semibold text-amber-900">
+                      Partial payment plan — 3 installments
+                    </p>
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-amber-900 font-semibold">
-                        Due today ({Math.round(DEPOSIT_PERCENT * 100)}%)
+                      <span className="text-amber-900">
+                        First installment due today
                       </span>
                       <span className="font-bold text-amber-900">
                         {formatHotelPrice(amountDueNow)}
@@ -927,7 +884,7 @@ function CheckoutContent() {
                     </div>
                     <div className="flex items-center justify-between text-[11px]">
                       <span className="text-amber-900/80">
-                        Due 30 days before trip
+                        Remaining (2 installments)
                       </span>
                       <span className="font-semibold text-amber-900/80">
                         {formatHotelPrice(amountDueLater)}
