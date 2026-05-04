@@ -413,6 +413,10 @@ function CheckoutContent() {
           .slice(1)
           .reduce((sum, s) => sum + s.amount, 0)
       : 0;
+  const remainingDueCopy =
+    installmentSchedule && installmentSchedule.length > 1
+      ? `by ${formatInstallmentDue(installmentSchedule[1].dueAt)}`
+      : "later";
 
   const tripBookingWindow =
     type === "trip" && selectedTrip
@@ -966,7 +970,7 @@ function CheckoutContent() {
                           One charge today — you&apos;re all set
                         </p>
                       </button>
-                      {installmentsAllowed && installmentSchedule ? (
+                      {useWanderlyStripe ? (
                         <button
                           type="button"
                           onClick={() => setPaymentMode("partial")}
@@ -986,15 +990,43 @@ function CheckoutContent() {
                             )}
                           </div>
                           <p className="text-xl font-bold">
-                            ${installmentSchedule[0].amount.toLocaleString()}{" "}
-                            today
+                            ${amountDueNow.toLocaleString()}
                           </p>
                           <p className="text-xs text-muted-foreground mt-1">
-                            Split into 3 equal installments — full schedule
-                            below
+                            ${amountDueLater.toLocaleString()} due {remainingDueCopy}
                           </p>
                         </button>
-                      ) : null}
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            !installmentsBlocked && setPaymentMode("partial")
+                          }
+                          disabled={installmentsBlocked}
+                          className={cn(
+                            "rounded-xl border p-4 text-left transition-all",
+                            installmentsBlocked
+                              ? "opacity-50 cursor-not-allowed border-muted"
+                              : paymentMode === "partial"
+                                ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+                                : "border-muted hover:border-primary/40"
+                          )}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-semibold text-sm">
+                              Pay partial payment
+                            </span>
+                            {paymentMode === "partial" && !installmentsBlocked && (
+                              <Check className="h-4 w-4 text-primary" />
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {installmentsAllowed && installmentSchedule
+                              ? `${installmentSchedule.length} installments`
+                              : "Installments unavailable for this trip"}
+                          </p>
+                        </button>
+                      )}
                     </div>
 
                     {installmentsBlocked && selectedTrip && (

@@ -725,36 +725,18 @@ function CheckoutContent() {
                         <p className="text-[10px] text-muted-foreground">
                           Split into 3 equal installments — see schedule below.
                         </p>
-                        {paymentMode === "partial" && (
-                          <div className="mt-3 space-y-1.5">
-                            {installmentSchedule.map((s) => (
-                              <div
-                                key={s.index}
-                                className="flex items-center justify-between gap-2 rounded-md bg-white border px-2.5 py-1.5"
-                              >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary shrink-0">
-                                    {s.index}
-                                  </span>
-                                  <div className="min-w-0">
-                                    <p className="text-[11px] font-semibold leading-tight truncate">
-                                      {s.label}
-                                    </p>
-                                    <p className="text-[10px] text-muted-foreground leading-tight">
-                                      Due {formatInstallmentDue(s.dueAt)}
-                                    </p>
-                                  </div>
-                                </div>
-                                <p className="text-[11px] font-bold shrink-0">
-                                  ${s.amount.toLocaleString()}
-                                </p>
-                              </div>
-                            ))}
-                          </div>
-                        )}
                       </div>
                     </button>
                   ) : null}
+
+                  {paymentMode === "full" && (
+                    <div className="rounded-xl bg-muted/30 border p-3 text-xs">
+                      <p className="font-semibold">
+                        ${total.toLocaleString()} today — one charge,
+                        you&apos;re all set.
+                      </p>
+                    </div>
+                  )}
 
                   {installmentsBlocked && selectedTrip && (
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-900">
@@ -775,6 +757,52 @@ function CheckoutContent() {
                       </p>
                     </div>
                   )}
+
+                  {paymentMode === "partial" &&
+                    installmentsAllowed &&
+                    installmentSchedule && (
+                      <div className="rounded-xl border bg-muted/30 p-3 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                            Your installment schedule
+                          </p>
+                          <span className="text-[10px] text-muted-foreground">
+                            {installmentSchedule.length} payments
+                          </span>
+                        </div>
+                        {installmentSchedule.map((s) => (
+                          <div
+                            key={s.index}
+                            className="flex items-center justify-between gap-2 rounded-md bg-white border px-2.5 py-2"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary shrink-0">
+                                {s.index}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-[11px] font-semibold leading-tight truncate">
+                                  {s.label}
+                                </p>
+                                <p className="text-[10px] text-muted-foreground leading-tight">
+                                  Due {formatInstallmentDue(s.dueAt)}
+                                </p>
+                              </div>
+                            </div>
+                            <p className="text-[11px] font-bold shrink-0">
+                              ${s.amount.toLocaleString()}
+                            </p>
+                          </div>
+                        ))}
+                        <div className="mt-1 flex items-center justify-between rounded-md bg-primary/5 border border-primary/15 px-2.5 py-1.5">
+                          <span className="text-[11px] font-semibold">
+                            Due today
+                          </span>
+                          <span className="text-sm font-bold text-primary">
+                            ${installmentSchedule[0].amount.toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    )}
                 </div>
               </div>
             )}
