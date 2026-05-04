@@ -36,13 +36,8 @@ import { MobileHeader } from "@/components/mobile/mobile-header";
 import { PartnerTripTabs } from "@/components/mobile/partner-trip-tabs";
 import { AiSurveyCard } from "@/components/partner/ai-survey-card";
 import { generatePartnerTrip } from "@/lib/ai/partner-trip-generator";
-import {
-  computeInstallments,
-  daysUntilStart,
-  formatInstallmentDue,
-  installmentsEligible,
-  INSTALLMENTS_MIN_DAYS,
-} from "@/lib/installment-schedule";
+import { PartialPaymentCard } from "@/components/partner/partial-payment-card";
+import type { CustomSplit, PaymentSchedule } from "@/lib/installment-schedule";
 import {
   partnerTrips,
   tripCategories,
@@ -91,6 +86,7 @@ export default function MobilePartnerTripOverview({
   const [categories, setCategories] = useState<string[]>([]);
   const [difficulty, setDifficulty] = useState<Difficulty>("Moderate");
   const [maxGroupSize, setMaxGroupSize] = useState(10);
+  const [closeJoinDate, setCloseJoinDate] = useState("");
 
   // Status + visibility + pricing
   const [status, setStatus] = useState<TripStatus>("published");
@@ -100,6 +96,11 @@ export default function MobilePartnerTripOverview({
   const [taxRatePct, setTaxRatePct] = useState("8.25");
   const [useTieredPricing, setUseTieredPricing] = useState(false);
   const [installmentsEnabled, setInstallmentsEnabled] = useState(false);
+  const [paymentSchedule, setPaymentSchedule] =
+    useState<PaymentSchedule>("biweekly");
+  const [paymentCustomSplits, setPaymentCustomSplits] = useState<CustomSplit[]>(
+    []
+  );
   const [requireTravelerId, setRequireTravelerId] = useState(false);
   const [requestSocialMedia, setRequestSocialMedia] = useState(false);
   const [priceSolo, setPriceSolo] = useState(0);
@@ -169,6 +170,7 @@ export default function MobilePartnerTripOverview({
     setCategories(t.category);
     setDifficulty(t.difficulty);
     setMaxGroupSize(t.maxGroupSize);
+    setCloseJoinDate(t.closeJoinDate?.slice(0, 10) || "");
     setStatus(t.status);
     setVisibility(t.visibility ?? "public");
     setPrice(t.price);
@@ -191,6 +193,8 @@ export default function MobilePartnerTripOverview({
     setIncluded(t.included);
     setNotIncluded(t.notIncluded);
     setInstallmentsEnabled(!!t.partialPayment?.enabled);
+    setPaymentSchedule(t.partialPayment?.schedule || "biweekly");
+    setPaymentCustomSplits(t.partialPayment?.customSplits || []);
     setRequireTravelerId(!!t.requireTravelerId);
     setRequestSocialMedia(!!t.requestSocialMedia);
     return subscribeToUserPartnerTrips(() => {
@@ -222,6 +226,10 @@ export default function MobilePartnerTripOverview({
       JSON.stringify(included) !== JSON.stringify(initial.included) ||
       JSON.stringify(notIncluded) !== JSON.stringify(initial.notIncluded) ||
       installmentsEnabled !== !!initial.partialPayment?.enabled ||
+      paymentSchedule !== (initial.partialPayment?.schedule || "biweekly") ||
+      JSON.stringify(paymentCustomSplits) !==
+        JSON.stringify(initial.partialPayment?.customSplits || []) ||
+      closeJoinDate !== (initial.closeJoinDate?.slice(0, 10) || "") ||
       requireTravelerId !== !!initial.requireTravelerId ||
       requestSocialMedia !== !!initial.requestSocialMedia ||
       visibility !== (initial.visibility ?? "public")
@@ -246,6 +254,9 @@ export default function MobilePartnerTripOverview({
     included,
     notIncluded,
     installmentsEnabled,
+    paymentSchedule,
+    paymentCustomSplits,
+    closeJoinDate,
     requireTravelerId,
     requestSocialMedia,
     visibility,
@@ -302,8 +313,15 @@ export default function MobilePartnerTripOverview({
         ? { solo: priceSolo, couple: priceCouple, groupOf3: priceGroupOf3 }
         : undefined,
       partialPayment: installmentsEnabled
-        ? { enabled: true, splits: [0.3334, 0.3333, 0.3333] }
+        ? {
+            enabled: true,
+            schedule: paymentSchedule,
+            ...(paymentSchedule === "custom"
+              ? { customSplits: paymentCustomSplits }
+              : {}),
+          }
         : undefined,
+      closeJoinDate: closeJoinDate || undefined,
       requireTravelerId: requireTravelerId || undefined,
       requestSocialMedia: requestSocialMedia || undefined,
       itinerary: itinerary.map((d, i) => ({ ...d, day: i + 1 })),
@@ -556,6 +574,25 @@ export default function MobilePartnerTripOverview({
                 </p>
               )}
             </Field>
+            <Field label="Close booking on (optional)">
+              <Input
+                type="date"
+                value={closeJoinDate}
+                onChange={(e) => setCloseJoinDate(e.target.value)}
+                min={new Date().toISOString().split("T")[0]}
+                max={initial.startDate.slice(0, 10)}
+              />
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                After this date, new travelers can&apos;t join. Leave blank
+                to accept until the trip starts.
+              </p>
+              {closeJoinDate &&
+                closeJoinDate > initial.startDate.slice(0, 10) && (
+                  <p className="mt-1 text-[11px] text-destructive">
+                    Must be on or before the trip start date.
+                  </p>
+                )}
+            </Field>
           </EditCard>
 
           {/* Status */}
@@ -744,44 +781,18 @@ export default function MobilePartnerTripOverview({
               </p>
             </Field>
 
-            {/* Allow partial payment */}
-            <div className="pt-3 border-t space-y-3">
-              <div className="flex items-start gap-3">
-                <div className="flex-1">
-                  <p className="font-bold text-sm">Allow partial payment</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    Travelers split into 3 installments scheduled before the
-                    trip starts.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={installmentsEnabled}
-                  onClick={() => setInstallmentsEnabled((v) => !v)}
-                  className={cn(
-                    "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
-                    installmentsEnabled
-                      ? "bg-primary"
-                      : "bg-muted-foreground/25"
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform",
-                      installmentsEnabled
-                        ? "translate-x-5"
-                        : "translate-x-0.5"
-                    )}
-                  />
-                </button>
-              </div>
-              {installmentsEnabled && initial.startDate && (
-                <InstallmentPreview
-                  totalPerPerson={price}
-                  startDate={initial.startDate}
-                />
-              )}
+            <div className="pt-3 border-t">
+              <PartialPaymentCard
+                enabled={installmentsEnabled}
+                onEnabledChange={setInstallmentsEnabled}
+                schedule={paymentSchedule}
+                onScheduleChange={setPaymentSchedule}
+                customSplits={paymentCustomSplits}
+                onCustomSplitsChange={setPaymentCustomSplits}
+                totalPerPerson={price}
+                startDate={initial.startDate}
+                compact
+              />
             </div>
           </EditCard>
 
@@ -1280,52 +1291,6 @@ function EditGuestToggle({
           )}
         />
       </button>
-    </div>
-  );
-}
-
-function InstallmentPreview({
-  totalPerPerson,
-  startDate,
-}: {
-  totalPerPerson: number;
-  startDate: string;
-}) {
-  if (!installmentsEligible(startDate)) {
-    const days = daysUntilStart(startDate);
-    return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-900">
-        Installments need at least {INSTALLMENTS_MIN_DAYS} days before the trip
-        starts. This trip is {days <= 0 ? "due" : `${days} day${days === 1 ? "" : "s"} away`} —
-        travelers will be asked to pay in full at checkout.
-      </div>
-    );
-  }
-  const schedule = computeInstallments(totalPerPerson, startDate);
-  return (
-    <div className="space-y-2">
-      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-        Per-person schedule
-      </p>
-      {schedule.map((s) => (
-        <div
-          key={s.index}
-          className="rounded-lg border bg-muted/20 p-3 flex items-center gap-3"
-        >
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-[11px] font-bold text-primary shrink-0">
-            {s.index}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold truncate">{s.label}</p>
-            <p className="text-[10px] text-muted-foreground">
-              Due {formatInstallmentDue(s.dueAt)} · {Math.round(s.percent * 100)}%
-            </p>
-          </div>
-          <p className="font-bold text-sm shrink-0">
-            ${s.amount.toLocaleString()}
-          </p>
-        </div>
-      ))}
     </div>
   );
 }

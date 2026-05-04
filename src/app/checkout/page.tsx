@@ -40,21 +40,25 @@ import {
   calculateNights,
 } from "@/lib/inventory/hotels";
 import {
-  depositAmount,
-  remainingAmount,
   tripTotal,
   perPersonRate,
-  DEPOSIT_PERCENT,
   calculatePriceBreakdown,
   formatRatePercent,
+  DEPOSIT_PERCENT,
+  depositAmount,
+  remainingAmount,
 } from "@/lib/trip-pricing";
 import {
   computeInstallments,
   installmentsEligible,
   formatInstallmentDue,
-  daysUntilStart,
-  INSTALLMENTS_MIN_DAYS,
+  hoursUntilStart,
+  INSTALLMENTS_MIN_HOURS,
 } from "@/lib/installment-schedule";
+import {
+  bookingClosedMessage,
+  resolveBookingWindow,
+} from "@/lib/trip-booking-window";
 import { trips } from "@/data/trips";
 import { hosts } from "@/data/hosts";
 import type { Trip } from "@/types";
@@ -234,8 +238,20 @@ function CheckoutContent() {
     if (step !== 3 || !useWanderlyStripe || !wAmt || !firstName || !email) {
       return;
     }
+    // Partial: host installments → first scheduled charge (matches schedule).
+    // Otherwise Wanderly 20% deposit (GrandpartialAmt). Full → grand total.
     const amount =
-      paymentMode === "partial" ? wAmt.GrandpartialAmt : wAmt.GrandFullAmt;
+      paymentMode !== "partial"
+        ? Math.round(wAmt.GrandFullAmt)
+        : selectedTrip?.partialPayment?.enabled &&
+            installmentsEligible(selectedTrip.startDate)
+          ? computeInstallments(
+              Math.round(wAmt.GrandFullAmt),
+              selectedTrip.startDate,
+              selectedTrip.partialPayment?.schedule || "biweekly",
+              selectedTrip.partialPayment?.customSplits
+            )[0].amount
+          : Math.round(wAmt.GrandpartialAmt);
     let cancelled = false;
     fetch("/api/bookings/payment-intent", {
       method: "POST",
@@ -271,6 +287,7 @@ function CheckoutContent() {
     firstName,
     lastName,
     email,
+    selectedTrip,
     selectedTrip?.wanderly?._id,
     selectedTrip?.wanderly?.timestamp,
   ]);
@@ -372,40 +389,61 @@ function CheckoutContent() {
     !!selectedTrip?.partialPayment?.enabled &&
     !!selectedTrip &&
     !installmentsEligible(selectedTrip.startDate);
+  // Use the actually-charged grand total when present (Wanderly Stripe path
+  // computes its own service-fee math). Otherwise fall back to the displayed
+  // breakdown total.
+  const chargedTotal =
+    useWanderlyStripe && wAmt ? Math.round(wAmt.GrandFullAmt) : total;
   const installmentSchedule =
     installmentsAllowed && selectedTrip
-      ? computeInstallments(total, selectedTrip.startDate)
+      ? computeInstallments(
+          chargedTotal,
+          selectedTrip.startDate,
+          selectedTrip.partialPayment?.schedule || "biweekly",
+          selectedTrip.partialPayment?.customSplits
+        )
       : null;
 
-  // Wanderly Stripe trips use backend pricing math; others use installments or the platform deposit model.
-  const wanderlyPartialDueNow = wAmt ? wAmt.GrandpartialAmt : null;
-  const wanderlyPartialDueLater = wAmt
-    ? Number((wAmt.GrandFullAmt - wAmt.GrandpartialAmt).toFixed(2))
-    : null;
+  const depositPctLabel = Math.round(DEPOSIT_PERCENT * 100);
+  const wanderlyPartialDueLater =
+    useWanderlyStripe && wAmt
+      ? Math.round(wAmt.GrandFullAmt - wAmt.GrandpartialAmt)
+      : undefined;
+  const remainingDueCopy = "30 days before departure";
 
   const amountDueNow =
-    type === "trip" && paymentMode === "partial"
-      ? useWanderlyStripe && wanderlyPartialDueNow !== null
-        ? wanderlyPartialDueNow
-        : installmentSchedule
-          ? installmentSchedule[0].amount
-          : depositAmount(total)
-      : useWanderlyStripe && wAmt
-        ? wAmt.GrandFullAmt
-        : total;
+    type === "trip" && paymentMode === "partial" && installmentSchedule
+      ? installmentSchedule[0].amount
+      : type === "trip" &&
+          paymentMode === "partial" &&
+          useWanderlyStripe &&
+          wAmt &&
+          !installmentSchedule
+        ? Math.round(wAmt.GrandpartialAmt)
+        : useWanderlyStripe && wAmt
+          ? Math.round(wAmt.GrandFullAmt)
+          : total;
   const amountDueLater =
-    type === "trip" && paymentMode === "partial"
-      ? useWanderlyStripe && wanderlyPartialDueLater !== null
-        ? wanderlyPartialDueLater
-        : installmentSchedule
-          ? installmentSchedule[1].amount + installmentSchedule[2].amount
-          : remainingAmount(total)
+    type === "trip" && paymentMode === "partial" && installmentSchedule
+      ? installmentSchedule
+          .slice(1)
+          .reduce((sum, s) => sum + s.amount, 0)
       : 0;
 
-  const depositPctLabel = useWanderlyStripe ? 20 : Math.round(DEPOSIT_PERCENT * 100);
-  const remainingDueCopy = useWanderlyStripe
-    ? "1 week before departure"
-    : "30 days before departure";
+  const tripBookingWindow =
+    type === "trip" && selectedTrip
+      ? resolveBookingWindow({
+          startDate: selectedTrip.startDate,
+          closeJoinDate: selectedTrip.closeJoinDate,
+          currentBookings: selectedTrip.currentBookings,
+          maxGroupSize: selectedTrip.maxGroupSize,
+        })
+      : null;
+  const tripBookingsBlocked =
+    !!tripBookingWindow && tripBookingWindow.status !== "open";
+  const tripClosedMessage = tripBookingWindow
+    ? bookingClosedMessage(tripBookingWindow)
+    : null;
 
   const handleStep1Next = () => {
     if (!firstName || !lastName || !email || !phone) return;
@@ -422,6 +460,11 @@ function CheckoutContent() {
 
   const finalizeWanderlyBooking = async (paymentIntentId: string) => {
     if (!selectedTrip?.wanderly || !isPackPallyMember(packUser)) return;
+    if (tripBookingsBlocked) {
+      throw new Error(
+        tripClosedMessage || "Bookings are closed for this trip."
+      );
+    }
     const member = packUser!;
     const body = buildBookTripBody({
       trip: selectedTrip,
@@ -460,6 +503,12 @@ function CheckoutContent() {
 
   const handleConfirm = async () => {
     if (useWanderlyStripe && clientSecret) {
+      return;
+    }
+    if (type === "trip" && tripBookingsBlocked) {
+      setBookingError(
+        tripClosedMessage || "Bookings are closed for this trip."
+      );
       return;
     }
     if (type === "trip" && selectedTrip?.wanderly) {
@@ -640,6 +689,13 @@ function CheckoutContent() {
                   {type === "flight" || type === "trip" ? "traveler" : "guest"}
                   &apos;s information
                 </p>
+
+                {tripClosedMessage && (
+                  <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                    <p className="font-semibold">Bookings closed</p>
+                    <p className="mt-0.5">{tripClosedMessage}</p>
+                  </div>
+                )}
 
                 {type === "trip" && selectedTrip && tripPricing && (
                   <div className="mb-6 rounded-xl bg-primary/5 border border-primary/10 p-4">
@@ -866,12 +922,15 @@ function CheckoutContent() {
                       !lastName ||
                       !email ||
                       !phone ||
+                      tripBookingsBlocked ||
                       (type === "trip" &&
                         !!selectedTrip?.requireTravelerId &&
                         !travelerIdFile)
                     }
                   >
-                    Continue to payment
+                    {tripBookingsBlocked
+                      ? "Bookings closed"
+                      : "Continue to payment"}
                   </Button>
                 </div>
               </div>
@@ -932,7 +991,41 @@ function CheckoutContent() {
                           ${total.toLocaleString()} charged today
                         </p>
                       </button>
-                      {useWanderlyStripe ? (
+                      {installmentsAllowed && installmentSchedule ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          !installmentsBlocked && setPaymentMode("partial")
+                        }
+                        disabled={installmentsBlocked}
+                        className={cn(
+                          "rounded-xl border p-4 text-left transition-all",
+                          installmentsBlocked
+                            ? "opacity-50 cursor-not-allowed border-muted"
+                            : paymentMode === "partial"
+                              ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+                              : "border-muted hover:border-primary/40"
+                        )}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-semibold text-sm">
+                            Yes, split it
+                          </span>
+                          {paymentMode === "partial" &&
+                            !installmentsBlocked && (
+                              <Check className="h-4 w-4 text-primary" />
+                            )}
+                        </div>
+                        <p className="text-xl font-bold">
+                          ${installmentSchedule[0].amount.toLocaleString()}{" "}
+                          today
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Equal installments before departure — full schedule
+                          below.
+                        </p>
+                      </button>
+                      ) : useWanderlyStripe ? (
                       <button
                         type="button"
                         onClick={() => setPaymentMode("partial")}
@@ -955,41 +1048,43 @@ function CheckoutContent() {
                           ${amountDueNow.toLocaleString()}
                         </p>
                         <p className="text-xs text-muted-foreground mt-1">
-                          ${(wanderlyPartialDueLater ?? remainingAmount(total)).toLocaleString()} due{" "}
-                          {remainingDueCopy}
+                          ${(
+                            wanderlyPartialDueLater ?? remainingAmount(total)
+                          ).toLocaleString()}{" "}
+                          due {remainingDueCopy}
                         </p>
                       </button>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            !installmentsBlocked && setPaymentMode("partial")
-                          }
-                          disabled={installmentsBlocked}
-                          className={cn(
-                            "rounded-xl border p-4 text-left transition-all",
-                            installmentsBlocked
-                              ? "opacity-50 cursor-not-allowed border-muted"
-                              : paymentMode === "partial"
+                      <button
+                        type="button"
+                        onClick={() =>
+                          !installmentsBlocked && setPaymentMode("partial")
+                        }
+                        disabled={installmentsBlocked}
+                        className={cn(
+                          "rounded-xl border p-4 text-left transition-all",
+                          installmentsBlocked
+                            ? "opacity-50 cursor-not-allowed border-muted"
+                            : paymentMode === "partial"
                               ? "border-primary bg-primary/5 ring-2 ring-primary/20"
                               : "border-muted hover:border-primary/40"
-                          )}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-semibold text-sm">
-                              Yes, split it
-                            </span>
-                            {paymentMode === "partial" &&
-                              !installmentsBlocked && (
-                                <Check className="h-4 w-4 text-primary" />
-                              )}
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            {installmentsAllowed && installmentSchedule
-                              ? "3 installments"
-                              : `${Math.round(DEPOSIT_PERCENT * 100)}% deposit`}
-                          </p>
-                        </button>
+                        )}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-semibold text-sm">
+                            Yes, split it
+                          </span>
+                          {paymentMode === "partial" &&
+                            !installmentsBlocked && (
+                              <Check className="h-4 w-4 text-primary" />
+                            )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {installmentsAllowed && installmentSchedule
+                            ? "3 installments"
+                            : `${Math.round(DEPOSIT_PERCENT * 100)}% deposit`}
+                        </p>
+                      </button>
                       )}
                     </div>
 
@@ -1008,15 +1103,16 @@ function CheckoutContent() {
                           Partial payment isn&apos;t available for this trip.
                         </p>
                         <p className="mt-0.5 leading-snug">
-                          The host enabled installments, but this trip is{" "}
+                          The host enabled installments, but this trip starts{" "}
                           {(() => {
-                            const d = daysUntilStart(selectedTrip.startDate);
-                            return d <= 0
-                              ? "due"
-                              : `${d} day${d === 1 ? "" : "s"} away`;
+                            const h = hoursUntilStart(selectedTrip.startDate);
+                            return h <= 0
+                              ? "now"
+                              : `in ${h} hour${h === 1 ? "" : "s"}`;
                           })()}{" "}
-                          — installments need at least {INSTALLMENTS_MIN_DAYS}{" "}
-                          days to schedule. Pay in full to confirm your spot.
+                          — installments aren&apos;t allowed within{" "}
+                          {INSTALLMENTS_MIN_HOURS} hours of trip start. Pay in
+                          full to confirm your spot.
                         </p>
                       </div>
                     )}
@@ -1419,17 +1515,17 @@ function CheckoutContent() {
                       <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-3">
                         <p className="text-xs font-semibold text-amber-900 flex items-center gap-1.5">
                           <Wallet className="h-3.5 w-3.5" />
-                          Partial payment plan — {depositPctLabel}% deposit
+                          Partial payment plan — 3 installments
                         </p>
                         <div className="mt-2 space-y-1 text-xs text-amber-900/80">
                           <div className="flex items-center justify-between">
-                            <span>Deposit due today</span>
+                            <span>First installment due today</span>
                             <span className="font-semibold">
                               ${amountDueNow.toLocaleString()}
                             </span>
                           </div>
                           <div className="flex items-center justify-between">
-                            <span>Remaining ({remainingDueCopy})</span>
+                            <span>Remaining (2 installments)</span>
                             <span className="font-semibold">
                               ${amountDueLater.toLocaleString()}
                             </span>
@@ -1474,7 +1570,7 @@ function CheckoutContent() {
                           <WanderlyConfirmPaymentButton
                             label={
                               type === "trip" && paymentMode === "partial"
-                                ? `Pay deposit ${formatHotelPrice(amountDueNow)}`
+                                ? `Pay first installment ${formatHotelPrice(amountDueNow)}`
                                 : `Pay ${formatHotelPrice(amountDueNow)}`
                             }
                             disabled={processing}
@@ -1529,16 +1625,18 @@ function CheckoutContent() {
                     <Button
                       size="lg"
                       onClick={handleConfirm}
-                      disabled={processing}
+                      disabled={processing || tripBookingsBlocked}
                       className="sm:min-w-[200px]"
                     >
-                      {processing ? (
+                      {tripBookingsBlocked ? (
+                        "Bookings closed"
+                      ) : processing ? (
                         "Processing..."
                       ) : (
                         <>
                           <Lock className="h-4 w-4" />
                           {type === "trip" && paymentMode === "partial"
-                            ? `Pay deposit ${formatHotelPrice(amountDueNow)}`
+                            ? `Pay first installment ${formatHotelPrice(amountDueNow)}`
                             : `Confirm and pay ${formatHotelPrice(total)}`}
                         </>
                       )}

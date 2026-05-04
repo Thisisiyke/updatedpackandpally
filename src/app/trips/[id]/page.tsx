@@ -49,6 +49,10 @@ import {
   calculatePriceBreakdown,
   formatRatePercent,
 } from "@/lib/trip-pricing";
+import {
+  bookingClosedMessage,
+  resolveBookingWindow,
+} from "@/lib/trip-booking-window";
 import { useRequireMember } from "@/hooks/use-require-member";
 import { canAccessTrip } from "@/lib/trip-visibility";
 
@@ -170,6 +174,14 @@ export default function TripDetailPage({
   const host = hosts.find((h) => h.id === trip.hostId);
   const spotsLeft = trip.maxGroupSize - trip.currentBookings;
   const fillPercentage = (trip.currentBookings / trip.maxGroupSize) * 100;
+  const bookingWindow = resolveBookingWindow({
+    startDate: trip.startDate,
+    closeJoinDate: trip.closeJoinDate,
+    currentBookings: trip.currentBookings,
+    maxGroupSize: trip.maxGroupSize,
+  });
+  const closedMessage = bookingClosedMessage(bookingWindow);
+  const bookingsBlocked = bookingWindow.status !== "open";
 
   const startDate = new Date(trip.startDate).toLocaleDateString("en-US", {
     month: "long",
@@ -505,12 +517,24 @@ export default function TripDetailPage({
                   );
                 })()}
 
+                {closedMessage && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                    <p className="font-semibold">Bookings closed</p>
+                    <p className="mt-0.5 leading-snug">{closedMessage}</p>
+                  </div>
+                )}
+
                 <Button
                   className="w-full h-12 text-base"
                   size="lg"
                   onClick={handleBookClick}
+                  disabled={bookingsBlocked}
                 >
-                  Join This Trip
+                  {bookingWindow.status === "closed-by-host"
+                    ? "Bookings closed"
+                    : bookingWindow.status === "trip-started"
+                      ? "Trip already started"
+                      : "Join This Trip"}
                 </Button>
 
                 <Button
@@ -552,8 +576,16 @@ export default function TripDetailPage({
                 ${trip.price.toLocaleString()}
               </p>
             </div>
-            <Button size="lg" onClick={handleBookClick}>
-              Join This Trip
+            <Button
+              size="lg"
+              onClick={handleBookClick}
+              disabled={bookingsBlocked}
+            >
+              {bookingWindow.status === "closed-by-host"
+                ? "Closed"
+                : bookingWindow.status === "trip-started"
+                  ? "Started"
+                  : "Join This Trip"}
             </Button>
           </div>
         </div>

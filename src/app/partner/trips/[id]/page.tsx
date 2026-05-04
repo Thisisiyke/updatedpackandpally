@@ -44,6 +44,8 @@ import { AiSurveyCard } from "@/components/partner/ai-survey-card";
 import { CURRENT_PARTNER } from "@/data/conversations";
 import { cn } from "@/lib/utils";
 import { deletePartnerTrip } from "@/lib/partner-delete-trip";
+import { PartialPaymentCard } from "@/components/partner/partial-payment-card";
+import type { CustomSplit, PaymentSchedule } from "@/lib/installment-schedule";
 
 function SavedToast({ visible }: { visible: boolean }) {
   if (!visible) return null;
@@ -112,6 +114,9 @@ export default function TripEditPage({
       : "8.25"
   );
   const [maxGroupSize, setMaxGroupSize] = useState(initial?.maxGroupSize || 10);
+  const [closeJoinDate, setCloseJoinDate] = useState(
+    initial?.closeJoinDate?.slice(0, 10) || ""
+  );
   const [status, setStatus] = useState(initial?.status || "draft");
   const [categories, setCategories] = useState<string[]>(initial?.category || []);
   const [included, setIncluded] = useState<string[]>(initial?.included || []);
@@ -123,6 +128,15 @@ export default function TripEditPage({
   );
   const [requestSocialMedia, setRequestSocialMedia] = useState(
     !!initial?.requestSocialMedia
+  );
+  const [installmentsEnabled, setInstallmentsEnabled] = useState(
+    !!initial?.partialPayment?.enabled
+  );
+  const [paymentSchedule, setPaymentSchedule] = useState<PaymentSchedule>(
+    initial?.partialPayment?.schedule || "biweekly"
+  );
+  const [paymentCustomSplits, setPaymentCustomSplits] = useState<CustomSplit[]>(
+    initial?.partialPayment?.customSplits || []
   );
   const [highlights, setHighlights] = useState<string[]>(
     initial?.highlights || []
@@ -147,11 +161,15 @@ export default function TripEditPage({
         : "8.25"
     );
     setMaxGroupSize(initial.maxGroupSize);
+    setCloseJoinDate(initial.closeJoinDate?.slice(0, 10) || "");
     setStatus(initial.status);
     setCategories([...initial.category]);
     setIncluded([...initial.included]);
     setNotIncluded([...initial.notIncluded]);
     setHighlights([...initial.highlights]);
+    setInstallmentsEnabled(!!initial.partialPayment?.enabled);
+    setPaymentSchedule(initial.partialPayment?.schedule || "biweekly");
+    setPaymentCustomSplits(initial.partialPayment?.customSplits || []);
   }, [initial]);
 
   if (tripLoading) {
@@ -347,6 +365,50 @@ export default function TripEditPage({
                     onChange={(e) => setMaxGroupSize(Number(e.target.value))}
                   />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>
+                    Close booking on{" "}
+                    <span className="text-muted-foreground font-normal">
+                      (optional)
+                    </span>
+                  </Label>
+                  {closeJoinDate && (
+                    <button
+                      type="button"
+                      onClick={() => setCloseJoinDate("")}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <Input
+                  type="date"
+                  value={closeJoinDate}
+                  onChange={(e) => setCloseJoinDate(e.target.value)}
+                  min={new Date().toISOString().split("T")[0]}
+                  max={initial.startDate.slice(0, 10)}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  After this date, new travelers can&apos;t join. Leave blank
+                  to accept bookings until the trip starts (
+                  {new Date(initial.startDate).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
+                  ).
+                </p>
+                {closeJoinDate &&
+                  closeJoinDate > initial.startDate.slice(0, 10) && (
+                    <p className="text-xs text-destructive">
+                      Close-booking date must be on or before the trip start
+                      date.
+                    </p>
+                  )}
               </div>
 
               <div className="space-y-2">
@@ -623,6 +685,18 @@ export default function TripEditPage({
                 automatically.
               </p>
             </div>
+            <div className="pt-3 border-t">
+              <PartialPaymentCard
+                enabled={installmentsEnabled}
+                onEnabledChange={setInstallmentsEnabled}
+                schedule={paymentSchedule}
+                onScheduleChange={setPaymentSchedule}
+                customSplits={paymentCustomSplits}
+                onCustomSplitsChange={setPaymentCustomSplits}
+                totalPerPerson={price}
+                startDate={initial.startDate}
+              />
+            </div>
           </div>
 
           {/* Guest data */}
@@ -758,3 +832,4 @@ function WebGuestToggle({
     </div>
   );
 }
+

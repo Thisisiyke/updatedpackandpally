@@ -51,6 +51,8 @@ import {
 import { hostNeedsStripeConnect } from "@/lib/host-needs-stripe-connect";
 import { StripeRequiredForCreate } from "@/components/partner/stripe-required-for-create";
 import { DestinationPlaceField } from "@/components/partner/destination-place-field";
+import { PartialPaymentCard } from "@/components/partner/partial-payment-card";
+import type { CustomSplit, PaymentSchedule } from "@/lib/installment-schedule";
 import type { Trip } from "@/types";
 
 const steps = [
@@ -104,6 +106,7 @@ export default function NewTripPage() {
   const [endDate, setEndDate] = useState(
     new Date(Date.now() + 37 * 86400000).toISOString().split("T")[0]
   );
+  const [closeJoinDate, setCloseJoinDate] = useState("");
   const [maxGroupSize, setMaxGroupSize] = useState(12);
 
   // Step 3 — Itinerary + highlights
@@ -134,6 +137,12 @@ export default function NewTripPage() {
   const [priceCouple, setPriceCouple] = useState(2199);
   const [priceGroupOf3, setPriceGroupOf3] = useState(1899);
   const [taxRatePct, setTaxRatePct] = useState("8.25"); // percent; stored as decimal on save
+  const [installmentsEnabled, setInstallmentsEnabled] = useState(false);
+  const [paymentSchedule, setPaymentSchedule] =
+    useState<PaymentSchedule>("biweekly");
+  const [paymentCustomSplits, setPaymentCustomSplits] = useState<CustomSplit[]>(
+    []
+  );
 
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [galleryFiles, setGalleryFiles] = useState<File[]>([]);
@@ -180,6 +189,7 @@ export default function NewTripPage() {
         const end = trip.endDate.slice(0, 10);
         setStartDate(start);
         setEndDate(end >= start ? end : start);
+        setCloseJoinDate(trip.closeJoinDate?.slice(0, 10) || "");
 
         setMaxGroupSize(Math.max(1, trip.maxGroupSize));
 
@@ -291,6 +301,9 @@ export default function NewTripPage() {
 
   /** YYYY-MM-DD end must be on or after start. */
   const datesValid = Boolean(startDate && endDate && endDate >= startDate);
+  /** Close-join date is optional; when set it must be on/before start. */
+  const closeJoinDateValid =
+    !closeJoinDate || (startDate ? closeJoinDate <= startDate : true);
   const itineraryMatchesTripLength =
     datesValid && itinerary.length === duration;
 
@@ -298,7 +311,7 @@ export default function NewTripPage() {
     if (step === 1)
       return title && destination && country && description && categories.length > 0;
     if (step === 2) {
-      return datesValid && maxGroupSize > 0;
+      return datesValid && closeJoinDateValid && maxGroupSize > 0;
     }
     if (step === 3) {
       return (
@@ -466,7 +479,19 @@ export default function NewTripPage() {
     form.append("latitude", placeLat != null ? String(placeLat) : "0");
     form.append("longitude", placeLng != null ? String(placeLng) : "0");
     form.append("otherTripName", "");
-    form.append("paylater", "false");
+    form.append("paylater", String(installmentsEnabled));
+    if (installmentsEnabled) {
+      form.append("paymentSchedule", paymentSchedule);
+      if (paymentSchedule === "custom") {
+        form.append(
+          "paymentCustomSplits",
+          JSON.stringify(paymentCustomSplits)
+        );
+      }
+    }
+    if (closeJoinDate) {
+      form.append("closeJoinDate", closeJoinDate);
+    }
 
     form.append("tripImages", coverFile);
     galleryFiles.slice(0, 7).forEach((f) => form.append("tripImages", f));
@@ -767,6 +792,43 @@ export default function NewTripPage() {
                 {startDate && endDate && endDate < startDate && (
                   <p className="text-xs text-destructive mt-2">
                     End date must be on or after the start date.
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>
+                    Close booking on{" "}
+                    <span className="text-muted-foreground font-normal">
+                      (optional)
+                    </span>
+                  </Label>
+                  {closeJoinDate && (
+                    <button
+                      type="button"
+                      onClick={() => setCloseJoinDate("")}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <Input
+                  type="date"
+                  value={closeJoinDate}
+                  onChange={(e) => setCloseJoinDate(e.target.value)}
+                  min={new Date().toISOString().split("T")[0]}
+                  max={startDate}
+                />
+                <p className="text-xs text-muted-foreground">
+                  After this date, new travelers can&apos;t join. Leave blank to
+                  accept bookings until the trip starts.
+                </p>
+                {closeJoinDate && !closeJoinDateValid && (
+                  <p className="text-xs text-destructive">
+                    Close-booking date must be on or before the trip start
+                    date.
                   </p>
                 )}
               </div>
@@ -1434,6 +1496,17 @@ export default function NewTripPage() {
                 </p>
               </div>
 
+              <PartialPaymentCard
+                enabled={installmentsEnabled}
+                onEnabledChange={setInstallmentsEnabled}
+                schedule={paymentSchedule}
+                onScheduleChange={setPaymentSchedule}
+                customSplits={paymentCustomSplits}
+                onCustomSplitsChange={setPaymentCustomSplits}
+                totalPerPerson={useTieredPricing ? priceSolo : price}
+                startDate={startDate}
+              />
+
               <div className="rounded-xl bg-primary/5 border border-primary/10 p-5">
                 <p className="text-sm font-semibold mb-4">
                   Your potential earnings
@@ -1684,3 +1757,4 @@ export default function NewTripPage() {
     </div>
   );
 }
+

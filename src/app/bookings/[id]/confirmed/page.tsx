@@ -9,8 +9,6 @@ import {
   Mail,
   Plane,
   Hotel as HotelIcon,
-  Calendar,
-  Users,
   MapPin,
   Clock,
   Phone,
@@ -21,10 +19,10 @@ import {
 } from "lucide-react";
 import { Container } from "@/components/shared/container";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { formatDuration, formatPrice } from "@/lib/flight-generator";
+import { formatDuration } from "@/lib/flight-generator";
 import { formatHotelPrice } from "@/lib/hotel-generator";
+import { TravelerInstallmentDateEditor } from "@/components/bookings/traveler-installment-date-editor";
 
 interface StoredBooking {
   bookingId: string;
@@ -76,7 +74,7 @@ function ConfirmedContent({ id }: { id: string }) {
           const toPay = Number(b.amountToPay ?? 0);
           const partial = b.paymentStatus === "partial";
           const total = partial ? paid + toPay : paid;
-          setWanderly(parsed);
+          setWanderly(parsed as WanderlyConfirmPayload);
           setBooking({
             bookingId: id,
             type: "trip",
@@ -147,6 +145,11 @@ function ConfirmedContent({ id }: { id: string }) {
   const isFlight = booking.type === "flight";
   const isTrip = booking.type === "trip";
   const wanderlyTrip = wanderly?.trip;
+  const tripCardData: WanderlyConfirmPayload["trip"] | undefined =
+    wanderlyTrip ??
+    (booking.trip
+      ? (booking.trip as WanderlyConfirmPayload["trip"])
+      : undefined);
   const formatDate = (dateStr: string) =>
     new Date(dateStr).toLocaleDateString("en-US", {
       weekday: "long",
@@ -154,6 +157,15 @@ function ConfirmedContent({ id }: { id: string }) {
       day: "numeric",
       year: "numeric",
     });
+
+  const wanderlyBookingIdRaw =
+    wanderly?.booking != null ? wanderly.booking._id : undefined;
+  const showWanderlyInstallmentEditor = Boolean(
+    isTrip &&
+      wanderly != null &&
+      wanderlyBookingIdRaw != null &&
+      String(wanderlyBookingIdRaw).length > 0
+  );
 
   return (
     <section className="bg-muted/20 pb-16 min-h-[calc(100vh-4rem)]">
@@ -209,8 +221,7 @@ function ConfirmedContent({ id }: { id: string }) {
               </Badge>
             </div>
 
-            {/* Flight details */}
-            {isFlight && booking.flight && (
+            {isFlight && booking.flight ? (
               <div className="space-y-4">
                 <div className="rounded-xl bg-muted/30 p-4">
                   <div className="flex items-center justify-between gap-4">
@@ -295,10 +306,9 @@ function ConfirmedContent({ id }: { id: string }) {
                   </div>
                 </div>
               </div>
-            )}
+            ) : null}
 
-            {/* Hotel details */}
-            {!isFlight && booking.hotel && (
+            {!isFlight && booking.hotel ? (
               <div className="space-y-4">
                 <div className="flex gap-4">
                   <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl">
@@ -361,34 +371,29 @@ function ConfirmedContent({ id }: { id: string }) {
                   </div>
                 </div>
               </div>
-            )}
+            ) : null}
 
-            {isTrip && (wanderlyTrip || booking.trip) && (
+            {isTrip && tripCardData ? (
               <div className="space-y-4">
                 <div className="flex gap-4">
-                  {(wanderlyTrip?.coverImage || booking.trip?.coverImage) && (
+                  {tripCardData.coverImage ? (
                     <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl">
                       <Image
-                        src={
-                          (wanderlyTrip?.coverImage ||
-                            booking.trip?.coverImage) as string
-                        }
-                        alt={(wanderlyTrip?.title || booking.trip?.title) as string}
+                        src={tripCardData.coverImage}
+                        alt={tripCardData.title ?? "Trip"}
                         fill
                         className="object-cover"
                         sizes="96px"
                       />
                     </div>
-                  )}
+                  ) : null}
                   <div>
-                    <h3 className="font-bold text-lg">
-                      {wanderlyTrip?.title || booking.trip?.title}
-                    </h3>
+                    <h3 className="font-bold text-lg">{tripCardData.title}</h3>
                     <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
                       <MapPin className="h-3 w-3" />
-                      {wanderlyTrip?.destination || booking.trip?.destination}
-                      {wanderlyTrip?.country || booking.trip?.country
-                        ? `, ${wanderlyTrip?.country || booking.trip?.country}`
+                      {tripCardData.destination}
+                      {tripCardData.country
+                        ? `, ${tripCardData.country}`
                         : ""}
                     </p>
                   </div>
@@ -414,8 +419,69 @@ function ConfirmedContent({ id }: { id: string }) {
                   </div>
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
+
+          {showWanderlyInstallmentEditor ? (
+            <TravelerInstallmentDateEditor
+              bookingId={String(wanderlyBookingIdRaw)}
+              tripStartDate={String(
+                wanderly!.booking.startDate ||
+                  wanderly!.trip?.startDate ||
+                  booking.checkIn ||
+                  ""
+              )}
+              paymentStatus={String(wanderly!.booking.paymentStatus ?? "")}
+              amountToPay={wanderly!.booking.amountToPay as number | string}
+              plan={
+                wanderly!.booking.installmentPlan as
+                  | {
+                      installments: {
+                        index: number;
+                        amount: number;
+                        dueAt: string;
+                      }[];
+                    }
+                  | null
+                  | undefined
+              }
+              onSaved={(next) => {
+                setWanderly((prev) => {
+                  if (!prev) return prev;
+                  return {
+                    ...prev,
+                    booking: {
+                      ...prev.booking,
+                      installmentPlan: next.installmentPlan as unknown as Record<
+                        string,
+                        unknown
+                      >,
+                      scheduleDateToPay: next.scheduleDateToPay,
+                    },
+                  };
+                });
+                try {
+                  const rawSession = sessionStorage.getItem(`pp_confirm_${id}`);
+                  if (rawSession) {
+                    const parsed = JSON.parse(rawSession) as WanderlyConfirmPayload;
+                    parsed.booking = {
+                      ...parsed.booking,
+                      installmentPlan:
+                        next.installmentPlan as unknown as Record<string, unknown>,
+                      scheduleDateToPay: next.scheduleDateToPay,
+                    };
+                    sessionStorage.setItem(
+                      `pp_confirm_${id}`,
+                      JSON.stringify(parsed)
+                    );
+                  }
+                } catch {
+                  /* ignore */
+                }
+              }}
+            />
+          ) : null}
+
 
           {/* Contact info */}
           <div className="rounded-2xl border bg-white p-6 animate-[fade-in-up_500ms_ease-out_700ms_both]">
