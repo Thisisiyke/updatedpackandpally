@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Star,
   MapPin,
@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronUp,
   MessageCircle,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,7 @@ import { Separator } from "@/components/ui/separator";
 import { MobileHeader } from "@/components/mobile/mobile-header";
 import { TermsModal } from "@/components/shared/terms-modal";
 import { CancellationPolicyModal } from "@/components/shared/cancellation-policy-modal";
+import { ReviewSection } from "@/components/shared/review-section";
 import { useWishlist } from "@/hooks/use-wishlist";
 import { trips } from "@/data/trips";
 import { hosts } from "@/data/hosts";
@@ -42,6 +44,7 @@ import {
   bookingClosedMessage,
   resolveBookingWindow,
 } from "@/lib/trip-booking-window";
+import { canAccessTrip } from "@/lib/trip-visibility";
 import { cn } from "@/lib/utils";
 
 export default function MobileTripDetail({
@@ -51,6 +54,8 @@ export default function MobileTripDetail({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const shareKey = searchParams.get("k");
   const wishlist = useWishlist();
   const [imageIdx, setImageIdx] = useState(0);
   const [expandedDay, setExpandedDay] = useState<number | null>(null);
@@ -79,6 +84,32 @@ export default function MobileTripDetail({
           <div>
             <p className="font-semibold">Trip not found</p>
             <Button onClick={() => router.back()} className="mt-4">Back</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!canAccessTrip(trip, shareKey)) {
+    return (
+      <div className="flex flex-col h-full min-h-[844px] bg-white">
+        <MobileHeader title="Private trip" />
+        <div className="flex-1 flex items-center justify-center p-6 text-center">
+          <div className="max-w-xs">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+              <Lock className="h-5 w-5" />
+            </div>
+            <p className="mt-4 text-lg font-bold">This trip is private</p>
+            <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
+              Only people with the host&apos;s share link can view this trip.
+              Ask the host for an invite link to join.
+            </p>
+            <Button
+              onClick={() => router.push("/mobile/search/trips")}
+              className="mt-6 w-full"
+            >
+              Browse public trips
+            </Button>
           </div>
         </div>
       </div>
@@ -477,6 +508,15 @@ export default function MobileTripDetail({
               </div>
             </>
           )}
+
+          <Separator className="my-5" />
+
+          {/* Reviews */}
+          <ReviewSection
+            tripId={trip.id}
+            tripTitle={trip.title}
+            variant="compact"
+          />
 
           <div className="h-4" />
         </div>

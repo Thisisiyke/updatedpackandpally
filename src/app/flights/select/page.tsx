@@ -19,6 +19,8 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { generateFlights, formatDuration, formatPrice } from "@/lib/flight-generator";
 import { useRequireMember } from "@/hooks/use-require-member";
+import { FEATURE_FLAGS, PROVIDER_NAMES } from "@/lib/constants";
+import { ProviderComingSoon } from "@/components/shared/provider-coming-soon";
 
 function SelectContent() {
   const router = useRouter();
@@ -290,6 +292,17 @@ function SelectContent() {
 }
 
 export default function FlightSelectPage() {
+  if (!FEATURE_FLAGS.publicFlightSearch) {
+    return (
+      <ProviderComingSoon
+        title="Flight booking — coming soon"
+        description="Once the flight integration is live, you'll review fares and ancillaries here before checking out."
+        provider={PROVIDER_NAMES.flights}
+        ctaHref="/browse-trips"
+        ctaLabel="Browse group trips"
+      />
+    );
+  }
   return (
     <Suspense fallback={<div className="py-20 text-center text-muted-foreground">Loading...</div>}>
       <SelectContent />

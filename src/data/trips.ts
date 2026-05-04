@@ -30,6 +30,8 @@ export const trips: Trip[] = [
       enabled: true,
       schedule: "biweekly",
     },
+    requireTravelerId: true,
+    requestSocialMedia: true,
     maxGroupSize: 12,
     currentBookings: 8,
     difficulty: "Easy",

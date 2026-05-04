@@ -72,3 +72,14 @@ export function formatRatePercent(rate: number): string {
   const pct = rate * 100;
   return `${Number(pct.toFixed(2))}%`;
 }
+
+/** Demo-checkout / non-installment deposit (see Wanderly 20% deposit math). */
+export const DEPOSIT_PERCENT = 0.2;
+
+export function depositAmount(total: number): number {
+  return Math.round(total * DEPOSIT_PERCENT);
+}
+
+export function remainingAmount(total: number): number {
+  return Math.max(0, total - depositAmount(total));
+}

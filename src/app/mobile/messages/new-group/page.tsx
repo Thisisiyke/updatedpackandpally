@@ -245,7 +245,10 @@ export default function NewGroupPage() {
                   </p>
                 </div>
               </button>
-              {trips.slice(0, 6).map((t) => (
+              {trips
+                .filter((t) => (t.visibility ?? "public") === "public")
+                .slice(0, 6)
+                .map((t) => (
                 <button
                   key={t.id}
                   onClick={() => setTripTitle(t.title)}

@@ -24,6 +24,9 @@ import {
   Sparkles,
   Loader2,
   Eye,
+  Globe,
+  Lock,
+  Share2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +48,8 @@ import {
   saveUserPartnerTrip,
   subscribeToUserPartnerTrips,
 } from "@/lib/user-partner-trips";
+import { ShareTripDialog } from "@/components/partner/share-trip-dialog";
+import { getShareableTripUrl } from "@/lib/trip-visibility";
 import { CURRENT_PARTNER } from "@/data/conversations";
 import { cn } from "@/lib/utils";
 
@@ -83,8 +88,10 @@ export default function MobilePartnerTripOverview({
   const [maxGroupSize, setMaxGroupSize] = useState(10);
   const [closeJoinDate, setCloseJoinDate] = useState("");
 
-  // Status + pricing
+  // Status + visibility + pricing
   const [status, setStatus] = useState<TripStatus>("published");
+  const [visibility, setVisibility] = useState<"public" | "private">("public");
+  const [shareOpen, setShareOpen] = useState(false);
   const [price, setPrice] = useState(0);
   const [taxRatePct, setTaxRatePct] = useState("8.25");
   const [useTieredPricing, setUseTieredPricing] = useState(false);
@@ -165,6 +172,7 @@ export default function MobilePartnerTripOverview({
     setMaxGroupSize(t.maxGroupSize);
     setCloseJoinDate(t.closeJoinDate?.slice(0, 10) || "");
     setStatus(t.status);
+    setVisibility(t.visibility ?? "public");
     setPrice(t.price);
     setTaxRatePct(
       typeof t.taxRate === "number" ? (t.taxRate * 100).toString() : "8.25"
@@ -223,7 +231,8 @@ export default function MobilePartnerTripOverview({
         JSON.stringify(initial.partialPayment?.customSplits || []) ||
       closeJoinDate !== (initial.closeJoinDate?.slice(0, 10) || "") ||
       requireTravelerId !== !!initial.requireTravelerId ||
-      requestSocialMedia !== !!initial.requestSocialMedia
+      requestSocialMedia !== !!initial.requestSocialMedia ||
+      visibility !== (initial.visibility ?? "public")
     );
   }, [
     initial,
@@ -250,6 +259,7 @@ export default function MobilePartnerTripOverview({
     closeJoinDate,
     requireTravelerId,
     requestSocialMedia,
+    visibility,
   ]);
 
   if (!initial) {
@@ -296,6 +306,7 @@ export default function MobilePartnerTripOverview({
       difficulty,
       maxGroupSize,
       status,
+      visibility,
       price,
       taxRate: Number(taxRatePct) / 100,
       priceTiers: useTieredPricing
@@ -608,6 +619,48 @@ export default function MobilePartnerTripOverview({
               {status === "draft" && "Not visible to travelers"}
               {status === "sold-out" && "Visible but not bookable"}
             </p>
+          </EditCard>
+
+          {/* Visibility */}
+          <EditCard
+            title="Visibility"
+            right={
+              <button
+                type="button"
+                onClick={() => setShareOpen(true)}
+                className="text-[11px] font-semibold text-primary flex items-center gap-1"
+              >
+                <Share2 className="h-3 w-3" />
+                Share
+              </button>
+            }
+          >
+            <p className="text-[11px] text-muted-foreground -mt-1">
+              {visibility === "public"
+                ? "Listed in browse and featured. Anyone can find this trip."
+                : "Not listed publicly. Only people with the share link can see this trip."}
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { value: "public" as const, icon: Globe, label: "Public" },
+                { value: "private" as const, icon: Lock, label: "Private" },
+              ].map((v) => (
+                <button
+                  key={v.value}
+                  type="button"
+                  onClick={() => setVisibility(v.value)}
+                  className={cn(
+                    "rounded-lg border py-2 text-xs font-semibold flex items-center justify-center gap-1.5",
+                    visibility === v.value
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "text-muted-foreground"
+                  )}
+                >
+                  <v.icon className="h-3.5 w-3.5" />
+                  {v.label}
+                </button>
+              ))}
+            </div>
           </EditCard>
 
           {/* Pricing */}
@@ -1039,6 +1092,17 @@ export default function MobilePartnerTripOverview({
           )}
         </Button>
       </div>
+
+      <ShareTripDialog
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        tripTitle={title || initial.title}
+        visibility={visibility}
+        shareUrl={getShareableTripUrl(
+          { id: initial.id, slug: initial.slug, visibility },
+          "/mobile/trips"
+        )}
+      />
     </div>
   );
 }

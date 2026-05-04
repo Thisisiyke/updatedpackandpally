@@ -3,7 +3,7 @@
 import { use, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { notFound, useRouter } from "next/navigation";
+import { notFound, useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronRight,
   Calendar,
@@ -18,6 +18,7 @@ import {
   Minus,
   Plus,
   Share2,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +34,7 @@ import { Container } from "@/components/shared/container";
 import { RatingStars } from "@/components/shared/rating-stars";
 import { TermsModal } from "@/components/shared/terms-modal";
 import { CancellationPolicyModal } from "@/components/shared/cancellation-policy-modal";
+import { ReviewSection } from "@/components/shared/review-section";
 import { trips } from "@/data/trips";
 import { hosts } from "@/data/hosts";
 import type { Trip } from "@/types";
@@ -52,6 +54,7 @@ import {
   resolveBookingWindow,
 } from "@/lib/trip-booking-window";
 import { useRequireMember } from "@/hooks/use-require-member";
+import { canAccessTrip } from "@/lib/trip-visibility";
 
 export default function TripDetailPage({
   params,
@@ -60,6 +63,8 @@ export default function TripDetailPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const shareKey = searchParams.get("k");
   const { ensureMember, loginDialog } = useRequireMember();
   const seedTrip = trips.find((t) => t.id === id);
   const [trip, setTrip] = useState<Trip | null>(seedTrip ?? null);
@@ -138,6 +143,26 @@ export default function TripDetailPage({
   }
 
   if (!trip) return notFound();
+
+  if (!canAccessTrip(trip, shareKey)) {
+    return (
+      <Container className="py-20">
+        <div className="mx-auto max-w-md rounded-2xl border bg-white p-8 text-center shadow-sm">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+            <Lock className="h-5 w-5" />
+          </div>
+          <h1 className="mt-4 text-2xl font-bold">This trip is private</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Only people with the host&apos;s share link can view this trip.
+            Ask the host for an invite link to join.
+          </p>
+          <Button asChild className="mt-6">
+            <Link href="/browse-trips">Browse public trips</Link>
+          </Button>
+        </div>
+      </Container>
+    );
+  }
 
   const proceedToCheckout = () => {
     setTermsOpen(false);
@@ -373,6 +398,10 @@ export default function TripDetailPage({
                 </div>
               </div>
             )}
+
+            {/* Reviews */}
+            <Separator className="my-8" />
+            <ReviewSection tripId={trip.id} tripTitle={trip.title} />
           </div>
 
           {/* Right Column - Booking Card */}

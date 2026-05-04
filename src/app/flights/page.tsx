@@ -7,6 +7,8 @@ import { Container } from "@/components/shared/container";
 import { FlightSearchForm } from "@/components/flights/flight-search-form";
 import { FlightCard } from "@/components/flights/flight-card";
 import { EmptyState } from "@/components/shared/empty-state";
+import { ProviderComingSoon } from "@/components/shared/provider-coming-soon";
+import { FEATURE_FLAGS, PROVIDER_NAMES } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
@@ -323,6 +325,22 @@ function FlightsContent() {
 }
 
 export default function FlightsPage() {
+  if (!FEATURE_FLAGS.publicFlightSearch) {
+    return (
+      <ProviderComingSoon
+        title="Flight search — coming soon"
+        description="We're connecting to a global flight aggregator so you can book flights alongside your group trips. In the meantime, group trips are fully live."
+        provider={PROVIDER_NAMES.flights}
+        ctaHref="/browse-trips"
+        ctaLabel="Browse group trips"
+        perks={[
+          "Search 400+ airlines in one place",
+          "Bundle flights with your group trip booking",
+          "Pay in installments — same as your trip",
+        ]}
+      />
+    );
+  }
   return (
     <Suspense fallback={<div className="py-20 text-center text-muted-foreground">Loading...</div>}>
       <FlightsContent />

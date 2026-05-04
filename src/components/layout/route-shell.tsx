@@ -8,8 +8,9 @@ import { Chatbot } from "@/components/ai/chatbot";
 export function RouteShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isMobile = pathname?.startsWith("/mobile");
+  const isPartner = pathname?.startsWith("/partner");
 
-  if (isMobile) {
+  if (isMobile || isPartner) {
     return <main className="flex-1">{children}</main>;
   }
 

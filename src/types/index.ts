@@ -76,6 +76,12 @@ export interface Trip {
     latitude?: number;
     longitude?: number;
   };
+  /**
+   * Discovery visibility. "public" trips appear in browse / featured /
+   * mobile discovery. "private" trips are only reachable via direct share
+   * link. Defaults to "public" if unset.
+   */
+  visibility?: "public" | "private";
 }
 
 export interface ItineraryDay {

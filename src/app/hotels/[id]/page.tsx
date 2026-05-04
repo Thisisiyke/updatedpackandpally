@@ -25,6 +25,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { generateHotels, formatHotelPrice, calculateNights } from "@/lib/hotel-generator";
+import { FEATURE_FLAGS, PROVIDER_NAMES } from "@/lib/constants";
+import { ProviderComingSoon } from "@/components/shared/provider-coming-soon";
 import { cn } from "@/lib/utils";
 import { useRequireMember } from "@/hooks/use-require-member";
 
@@ -386,6 +388,17 @@ export default function HotelDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  if (!FEATURE_FLAGS.publicHotelSearch) {
+    return (
+      <ProviderComingSoon
+        title="Hotel details — coming soon"
+        description="Once the property integration is live, you'll see room options, amenities, and pricing for this stay here."
+        provider={PROVIDER_NAMES.hotels}
+        ctaHref="/browse-trips"
+        ctaLabel="Browse group trips"
+      />
+    );
+  }
   const { id } = use(params);
   return (
     <Suspense fallback={<div className="py-20 text-center text-muted-foreground">Loading...</div>}>

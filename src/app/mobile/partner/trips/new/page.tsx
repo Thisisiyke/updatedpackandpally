@@ -21,6 +21,8 @@ import {
   FileText,
   Upload,
   Trash2,
+  Globe,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,6 +67,7 @@ export default function MobileCreateTripPage() {
     "Easy" | "Moderate" | "Challenging"
   >("Moderate");
   const [categories, setCategories] = useState<string[]>(["Cultural"]);
+  const [visibility, setVisibility] = useState<"public" | "private">("public");
   const [generating, setGenerating] = useState(false);
 
   // Step 2
@@ -325,6 +328,7 @@ export default function MobileCreateTripPage() {
       included,
       notIncluded,
       status: "published",
+      visibility,
       revenue: 0,
       createdAt: new Date().toISOString(),
       rating: 0,
@@ -483,6 +487,52 @@ export default function MobileCreateTripPage() {
                 placeholder="What makes this trip special?"
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               />
+            </Field>
+
+            <Field label="Trip visibility">
+              <div className="grid grid-cols-1 gap-2">
+                {[
+                  {
+                    value: "public" as const,
+                    icon: Globe,
+                    title: "Public",
+                    desc: "Listed in browse and featured. Anyone can find and join.",
+                  },
+                  {
+                    value: "private" as const,
+                    icon: Lock,
+                    title: "Private",
+                    desc: "Not listed publicly. Only people with the link can see and book it.",
+                  },
+                ].map((v) => (
+                  <button
+                    key={v.value}
+                    type="button"
+                    onClick={() => setVisibility(v.value)}
+                    className={cn(
+                      "rounded-xl border p-3 text-left transition-colors",
+                      visibility === v.value
+                        ? "border-primary bg-primary/5"
+                        : ""
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <v.icon
+                        className={cn(
+                          "h-3.5 w-3.5",
+                          visibility === v.value
+                            ? "text-primary"
+                            : "text-muted-foreground"
+                        )}
+                      />
+                      <p className="text-xs font-bold">{v.title}</p>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
+                      {v.desc}
+                    </p>
+                  </button>
+                ))}
+              </div>
             </Field>
 
             <button
