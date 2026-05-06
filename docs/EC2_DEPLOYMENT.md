@@ -245,8 +245,8 @@ git pull
 npm ci
 npx prisma generate
 # npx prisma migrate deploy   # if needed
-npm run build
-pm2 restart packandpally-web
+NODE_OPTIONS="--max-old-space-size=3072" npm run build
+pm2 restart packandpallyweb
 ```
 
 ---
