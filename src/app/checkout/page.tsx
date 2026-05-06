@@ -376,8 +376,29 @@ function CheckoutContent() {
     ? tripPricing.subtotal
     : 0;
   const breakdown = calculatePriceBreakdown(subtotal, selectedTrip?.taxRate);
-  const taxes = breakdown.tax + breakdown.platformFee;
   const total = breakdown.total;
+  const isTripWanderlyPricing =
+    type === "trip" && useWanderlyStripe && !!wAmt;
+  const displaySubtotal = isTripWanderlyPricing
+    ? Math.round(wAmt.fullAmt)
+    : subtotal;
+  const displayTax = isTripWanderlyPricing
+    ? Math.round(wAmt.fullAmtTax)
+    : breakdown.tax;
+  const displayPlatformFee = isTripWanderlyPricing
+    ? Math.round(wAmt.fullAmtServiceFee)
+    : breakdown.platformFee;
+  const displayTaxRate =
+    isTripWanderlyPricing && wAmt.fullAmt > 0
+      ? wAmt.fullAmtTax / wAmt.fullAmt
+      : breakdown.taxRate;
+  const displayPlatformFeeRate =
+    isTripWanderlyPricing && wAmt.fullAmt > 0
+      ? wAmt.fullAmtServiceFee / wAmt.fullAmt
+      : breakdown.platformFeeRate;
+  const displayTotal = isTripWanderlyPricing
+    ? Math.round(wAmt.GrandFullAmt)
+    : total;
 
   const installmentsAllowed =
     type === "trip" &&
@@ -392,8 +413,7 @@ function CheckoutContent() {
   // Use the actually-charged grand total when present (Wanderly Stripe path
   // computes its own service-fee math). Otherwise fall back to the displayed
   // breakdown total.
-  const chargedTotal =
-    useWanderlyStripe && wAmt ? Math.round(wAmt.GrandFullAmt) : total;
+  const chargedTotal = displayTotal;
   const installmentSchedule =
     installmentsAllowed && selectedTrip
       ? computeInstallments(
@@ -405,30 +425,36 @@ function CheckoutContent() {
       : null;
 
   const depositPctLabel = Math.round(DEPOSIT_PERCENT * 100);
-  const wanderlyPartialDueLater =
-    useWanderlyStripe && wAmt
-      ? Math.round(wAmt.GrandFullAmt - wAmt.GrandpartialAmt)
-      : undefined;
+  const partialDepositNow =
+    isTripWanderlyPricing && wAmt
+      ? Math.round(wAmt.GrandpartialAmt)
+      : depositAmount(total);
+  const partialDepositDueLater =
+    isTripWanderlyPricing && wAmt
+      ? Math.max(
+          0,
+          Math.round(wAmt.GrandFullAmt) - Math.round(wAmt.GrandpartialAmt)
+        )
+      : remainingAmount(total);
   const remainingDueCopy = "30 days before departure";
 
   const amountDueNow =
     type === "trip" && paymentMode === "partial" && installmentSchedule
       ? installmentSchedule[0].amount
       : type === "trip" &&
-          paymentMode === "partial" &&
-          useWanderlyStripe &&
-          wAmt &&
-          !installmentSchedule
-        ? Math.round(wAmt.GrandpartialAmt)
-        : useWanderlyStripe && wAmt
-          ? Math.round(wAmt.GrandFullAmt)
+          paymentMode === "partial"
+        ? partialDepositNow
+        : isTripWanderlyPricing
+          ? displayTotal
           : total;
   const amountDueLater =
     type === "trip" && paymentMode === "partial" && installmentSchedule
       ? installmentSchedule
           .slice(1)
           .reduce((sum, s) => sum + s.amount, 0)
-      : 0;
+      : type === "trip" && paymentMode === "partial"
+        ? partialDepositDueLater
+        : 0;
 
   const tripBookingWindow =
     type === "trip" && selectedTrip
@@ -497,6 +523,26 @@ function CheckoutContent() {
       );
     } catch {
       /* ignore */
+    }
+    const tripHost = hosts.find((h) => h.id === selectedTrip.hostId);
+    joinTripGroupChat(selectedTrip, tripHost);
+    try {
+      const backendTripId = selectedTrip.wanderly?._id;
+      if (backendTripId) {
+        await fetch("/api/me/messages/send", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            kind: "group",
+            tripId: backendTripId,
+            tripName: selectedTrip.title,
+            text: `${member.name || "Traveler"} joined the trip`,
+          }),
+        });
+      }
+    } catch {
+      // Non-blocking: booking success should not fail if chat bootstrap fails.
     }
     router.push(`/bookings/${encodeURIComponent(bid)}/confirmed`);
   };
@@ -743,29 +789,30 @@ function CheckoutContent() {
                     <div className="space-y-1 text-sm">
                       <div className="flex items-center justify-between">
                         <span className="text-muted-foreground">
-                          ${tripPricing.rate.toLocaleString()} × {tripTravelers}{" "}
-                          traveler{tripTravelers !== 1 ? "s" : ""}
+                          {isTripWanderlyPricing
+                            ? "Trip subtotal"
+                            : `$${tripPricing.rate.toLocaleString()} × ${tripTravelers} traveler${tripTravelers !== 1 ? "s" : ""}`}
                         </span>
                         <span>
-                          ${tripPricing.subtotal.toLocaleString()}
+                          ${displaySubtotal.toLocaleString()}
                         </span>
                       </div>
                       <div className="flex items-center justify-between text-muted-foreground">
                         <span>
-                          Tax ({formatRatePercent(breakdown.taxRate)})
+                          Tax ({formatRatePercent(displayTaxRate)})
                         </span>
-                        <span>${breakdown.tax.toLocaleString()}</span>
+                        <span>${displayTax.toLocaleString()}</span>
                       </div>
                       <div className="flex items-center justify-between text-muted-foreground">
                         <span>
                           Platform fee (
-                          {formatRatePercent(breakdown.platformFeeRate)})
+                          {formatRatePercent(displayPlatformFeeRate)})
                         </span>
-                        <span>${breakdown.platformFee.toLocaleString()}</span>
+                        <span>${displayPlatformFee.toLocaleString()}</span>
                       </div>
                       <div className="flex items-center justify-between pt-1 border-t font-bold">
                         <span>Total</span>
-                        <span>${breakdown.total.toLocaleString()}</span>
+                        <span>${displayTotal.toLocaleString()}</span>
                       </div>
                     </div>
                     {selectedTrip.priceTiers && (
@@ -988,7 +1035,7 @@ function CheckoutContent() {
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          ${total.toLocaleString()} charged today
+                          ${displayTotal.toLocaleString()} charged today
                         </p>
                       </button>
                       {installmentsAllowed && installmentSchedule ? (
@@ -1048,9 +1095,7 @@ function CheckoutContent() {
                           ${amountDueNow.toLocaleString()}
                         </p>
                         <p className="text-xs text-muted-foreground mt-1">
-                          ${(
-                            wanderlyPartialDueLater ?? remainingAmount(total)
-                          ).toLocaleString()}{" "}
+                          ${partialDepositDueLater.toLocaleString()}{" "}
                           due {remainingDueCopy}
                         </p>
                       </button>
@@ -1081,7 +1126,7 @@ function CheckoutContent() {
                         </div>
                         <p className="text-xs text-muted-foreground">
                           {installmentsAllowed && installmentSchedule
-                            ? "3 installments"
+                            ? `${installmentSchedule.length} installments`
                             : `${Math.round(DEPOSIT_PERCENT * 100)}% deposit`}
                         </p>
                       </button>
@@ -1091,7 +1136,7 @@ function CheckoutContent() {
                     {paymentMode === "full" && (
                       <div className="rounded-xl bg-muted/30 border p-3 text-sm">
                         <p className="font-semibold">
-                          ${total.toLocaleString()} today — one charge,
+                          ${displayTotal.toLocaleString()} today — one charge,
                           you&apos;re all set.
                         </p>
                       </div>
@@ -1126,7 +1171,7 @@ function CheckoutContent() {
                               Your installment schedule
                             </p>
                             <span className="text-[11px] text-muted-foreground">
-                              3 equal payments
+                              {installmentSchedule.length} payments
                             </span>
                           </div>
                           {installmentSchedule.map((s) => (
@@ -1178,7 +1223,7 @@ function CheckoutContent() {
                               </p>
                             </div>
                             <p className="text-sm font-bold">
-                              ${depositAmount(total).toLocaleString()}
+                              ${partialDepositNow.toLocaleString()}
                             </p>
                           </div>
                           <div className="flex items-center justify-between rounded-lg bg-white border px-3 py-2.5">
@@ -1191,7 +1236,7 @@ function CheckoutContent() {
                               </p>
                             </div>
                             <p className="text-sm font-bold">
-                              ${remainingAmount(total).toLocaleString()}
+                              ${partialDepositDueLater.toLocaleString()}
                             </p>
                           </div>
                           <div className="mt-1 flex items-center justify-between rounded-lg bg-primary/5 border border-primary/15 px-3 py-2">
@@ -1199,7 +1244,7 @@ function CheckoutContent() {
                               Due today
                             </span>
                             <span className="text-base font-bold text-primary">
-                              ${depositAmount(total).toLocaleString()}
+                              ${partialDepositNow.toLocaleString()}
                             </span>
                           </div>
                         </div>
@@ -1515,17 +1560,25 @@ function CheckoutContent() {
                       <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-3">
                         <p className="text-xs font-semibold text-amber-900 flex items-center gap-1.5">
                           <Wallet className="h-3.5 w-3.5" />
-                          Partial payment plan — 3 installments
+                          Partial payment plan
                         </p>
                         <div className="mt-2 space-y-1 text-xs text-amber-900/80">
                           <div className="flex items-center justify-between">
-                            <span>First installment due today</span>
+                            <span>
+                              {installmentSchedule
+                                ? "First installment due today"
+                                : "Deposit due today"}
+                            </span>
                             <span className="font-semibold">
                               ${amountDueNow.toLocaleString()}
                             </span>
                           </div>
                           <div className="flex items-center justify-between">
-                            <span>Remaining (2 installments)</span>
+                            <span>
+                              {installmentSchedule
+                                ? `Remaining (${Math.max(0, installmentSchedule.length - 1)} installments)`
+                                : "Remaining balance"}
+                            </span>
                             <span className="font-semibold">
                               ${amountDueLater.toLocaleString()}
                             </span>
@@ -1637,7 +1690,7 @@ function CheckoutContent() {
                           <Lock className="h-4 w-4" />
                           {type === "trip" && paymentMode === "partial"
                             ? `Pay first installment ${formatHotelPrice(amountDueNow)}`
-                            : `Confirm and pay ${formatHotelPrice(total)}`}
+                            : `Confirm and pay ${formatHotelPrice(amountDueNow)}`}
                         </>
                       )}
                     </Button>
@@ -1738,27 +1791,29 @@ function CheckoutContent() {
                 {selectedTrip && tripPricing ? (
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">
-                      ${tripPricing.rate.toLocaleString()} × {tripTravelers}
+                      {isTripWanderlyPricing
+                        ? "Trip subtotal"
+                        : `$${tripPricing.rate.toLocaleString()} × ${tripTravelers}`}
                     </span>
-                    <span>{formatHotelPrice(subtotal)}</span>
+                    <span>{formatHotelPrice(displaySubtotal)}</span>
                   </div>
                 ) : (
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Subtotal</span>
-                    <span>{formatHotelPrice(subtotal)}</span>
+                    <span>{formatHotelPrice(displaySubtotal)}</span>
                   </div>
                 )}
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">
-                    Tax ({formatRatePercent(breakdown.taxRate)})
+                    Tax ({formatRatePercent(displayTaxRate)})
                   </span>
-                  <span>{formatHotelPrice(breakdown.tax)}</span>
+                  <span>{formatHotelPrice(displayTax)}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">
-                    Platform fee ({formatRatePercent(breakdown.platformFeeRate)})
+                    Platform fee ({formatRatePercent(displayPlatformFeeRate)})
                   </span>
-                  <span>{formatHotelPrice(breakdown.platformFee)}</span>
+                  <span>{formatHotelPrice(displayPlatformFee)}</span>
                 </div>
               </div>
 
@@ -1767,7 +1822,7 @@ function CheckoutContent() {
               <div className="flex items-center justify-between">
                 <span className="font-semibold">Total</span>
                 <span className="text-xl font-bold">
-                  {formatHotelPrice(total)}
+                  {formatHotelPrice(displayTotal)}
                 </span>
               </div>
 
