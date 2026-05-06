@@ -1,6 +1,6 @@
 export function getWanderlyApiBaseUrl(): string {
   const base =
-    process.env.WANDERLY_API_BASE_URL ||
+    process.env.API_BASE_URL ||
     "";
   return base.replace(/\/$/, "");
 }
