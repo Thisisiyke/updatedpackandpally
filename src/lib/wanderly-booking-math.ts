@@ -2,7 +2,7 @@
  * Matches wanderly mobile `TripDetailsScreen` fee math for Stripe + book-trip.
  * fullAmt = (price + tripTax) * travelers
  * partial = 20% of fullAmt
- * Grand = base + 12% service + 8.25% tax on base
+ * Grand = base + 3% service + 8.25% tax on base
  */
 
 export function wanderlyBookingAmounts(
@@ -12,7 +12,7 @@ export function wanderlyBookingAmounts(
 ) {
   const fullAmt = (Number(pricePerPerson) + Number(tripTaxPerPerson)) * travelers;
   const partialAmt = fullAmt * 0.2;
-  const svc = 0.12;
+  const svc = 0.03;
   const tax = 0.0825;
   const GrandFullAmt = fullAmt + fullAmt * svc + fullAmt * tax;
   const GrandpartialAmt = partialAmt + partialAmt * svc + partialAmt * tax;
