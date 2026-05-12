@@ -90,10 +90,13 @@ export function buildTripMetadata(
   }
 
   const title = trip.title;
-  // Group trips use `description`; some types use `shortDescription` if present.
+  // Prefer the full trip description (richer preview), trimmed to a normal
+  // share-card length. Falls back to shortDescription, then a generic line.
+  // 160 chars is the standard ceiling for Google search snippets and looks
+  // clean in Slack, iMessage, WhatsApp, FB, and Twitter unfurls.
   const rawDescription =
-    ("shortDescription" in trip && trip.shortDescription) ||
     trip.description ||
+    ("shortDescription" in trip && trip.shortDescription) ||
     `Join "${trip.title}" — a curated group adventure in ${trip.destination}, ${trip.country}.`;
   const description = trim(rawDescription, 160);
   const og = safeOgImage(trip.coverImage);
