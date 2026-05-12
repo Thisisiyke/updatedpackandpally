@@ -9,8 +9,9 @@ export function RouteShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isMobile = pathname?.startsWith("/mobile");
   const isPartner = pathname?.startsWith("/partner");
+  const isAdmin = pathname?.startsWith("/admin");
 
-  if (isMobile || isPartner) {
+  if (isMobile || isPartner || isAdmin) {
     return <main className="flex-1">{children}</main>;
   }
 

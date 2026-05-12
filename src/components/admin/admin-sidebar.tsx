@@ -11,6 +11,7 @@ import {
   ShieldAlert,
   LogOut,
   Shield,
+  Compass,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getAdminStats } from "@/data/admin";
@@ -19,6 +20,7 @@ const navItems = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/partners", label: "Partners", icon: Building2 },
+  { href: "/admin/trips", label: "Trips", icon: Compass },
   { href: "/admin/bookings", label: "Bookings", icon: CalendarCheck },
   { href: "/admin/disputes", label: "Disputes", icon: AlertTriangle },
 ];
@@ -28,7 +30,7 @@ export function AdminSidebar() {
   const stats = getAdminStats();
 
   return (
-    <aside className="sticky top-16 h-[calc(100vh-4rem)] w-60 shrink-0 border-r bg-slate-900 text-white flex flex-col">
+    <aside className="sticky top-14 h-[calc(100vh-3.5rem)] w-60 shrink-0 border-r border-white/10 bg-slate-900 text-white flex flex-col">
       <div className="flex-1 overflow-y-auto p-4">
         <div className="mb-6 rounded-lg bg-red-500/10 p-3 border border-red-500/20">
           <div className="flex items-center gap-2">

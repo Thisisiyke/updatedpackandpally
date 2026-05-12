@@ -26,6 +26,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { adminBookings } from "@/data/admin";
+import { FEATURE_FLAGS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 function formatCurrency(amount: number) {
@@ -82,9 +83,22 @@ export default function AdminBookingsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
 
-  const filtered = adminBookings.filter((b) => {
+  // Hide flight + hotel bookings while those surfaces are gated to "coming soon".
+  // The only live booking type is group trips.
+  const showFlights = FEATURE_FLAGS.publicFlightSearch;
+  const showHotels = FEATURE_FLAGS.publicHotelSearch;
+  const showTypeFilter = showFlights || showHotels;
+
+  const sourceBookings = adminBookings.filter((b) => {
+    if (b.type === "flight" && !showFlights) return false;
+    if (b.type === "hotel" && !showHotels) return false;
+    return true;
+  });
+
+  const filtered = sourceBookings.filter((b) => {
     if (statusFilter !== "all" && b.status !== statusFilter) return false;
-    if (typeFilter !== "all" && b.type !== typeFilter) return false;
+    if (showTypeFilter && typeFilter !== "all" && b.type !== typeFilter)
+      return false;
     if (
       search &&
       !b.id.toLowerCase().includes(search.toLowerCase()) &&
@@ -96,12 +110,12 @@ export default function AdminBookingsPage() {
   });
 
   const stats = {
-    total: adminBookings.length,
-    revenue: adminBookings
+    total: sourceBookings.length,
+    revenue: sourceBookings
       .filter((b) => b.status !== "cancelled")
       .reduce((s, b) => s + b.amount, 0),
-    disputed: adminBookings.filter((b) => b.status === "disputed").length,
-    highRisk: adminBookings.filter((b) => b.riskScore === "high").length,
+    disputed: sourceBookings.filter((b) => b.status === "disputed").length,
+    highRisk: sourceBookings.filter((b) => b.riskScore === "high").length,
   };
 
   return (
@@ -113,7 +127,9 @@ export default function AdminBookingsPage() {
             Bookings
           </h1>
           <p className="mt-1 text-muted-foreground">
-            All bookings across the platform
+            {showTypeFilter
+              ? "All bookings across the platform"
+              : "Group trip bookings · flights & hotels show up here once those integrations ship"}
           </p>
         </div>
         <Button variant="outline" size="sm" className="gap-1.5 shrink-0">
@@ -154,27 +170,31 @@ export default function AdminBookingsPage() {
           />
         </div>
 
-        <div className="flex gap-1 rounded-lg border bg-white p-1 overflow-x-auto">
-          {[
-            { value: "all", label: "All types" },
-            { value: "flight", label: "Flights" },
-            { value: "hotel", label: "Hotels" },
-            { value: "trip", label: "Trips" },
-          ].map((tab) => (
-            <button
-              key={tab.value}
-              onClick={() => setTypeFilter(tab.value)}
-              className={cn(
-                "whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                typeFilter === tab.value
-                  ? "bg-primary text-white"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        {showTypeFilter && (
+          <div className="flex gap-1 rounded-lg border bg-white p-1 overflow-x-auto">
+            {[
+              { value: "all", label: "All types" },
+              ...(showFlights
+                ? [{ value: "flight", label: "Flights" }]
+                : []),
+              ...(showHotels ? [{ value: "hotel", label: "Hotels" }] : []),
+              { value: "trip", label: "Trips" },
+            ].map((tab) => (
+              <button
+                key={tab.value}
+                onClick={() => setTypeFilter(tab.value)}
+                className={cn(
+                  "whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                  typeFilter === tab.value
+                    ? "bg-primary text-white"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="flex gap-1 rounded-lg border bg-white p-1 overflow-x-auto">
           {[

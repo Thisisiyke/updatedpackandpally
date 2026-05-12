@@ -167,7 +167,7 @@ export function PartnerHeader() {
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              onSelect={() => router.push("/partner/settings/terms")}
+              onSelect={() => router.push("/partner/settings")}
               className="cursor-pointer"
             >
               <Settings className="h-4 w-4 mr-2" />

@@ -41,6 +41,7 @@ import {
   tripCategories,
 } from "@/data/partner-trips";
 import { AiTripModal } from "@/components/partner/ai-trip-modal";
+import { getHostDefaults } from "@/lib/host-defaults";
 import { cn } from "@/lib/utils";
 import { usePackPallyAuth } from "@/components/providers/session-provider";
 import {
@@ -159,6 +160,11 @@ export default function NewTripPage() {
     setDuplicateFromId(
       new URLSearchParams(window.location.search).get("duplicate")
     );
+    // Pre-fill from host-level defaults (Settings → Trip defaults).
+    const d = getHostDefaults();
+    if (typeof d.taxRate === "number") {
+      setTaxRatePct(String(Math.round(d.taxRate * 10000) / 100));
+    }
   }, []);
 
   useEffect(() => {

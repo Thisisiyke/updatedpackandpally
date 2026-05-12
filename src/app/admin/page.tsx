@@ -5,7 +5,6 @@ import Image from "next/image";
 import {
   Users,
   DollarSign,
-  Calendar,
   AlertTriangle,
   ArrowUpRight,
   ArrowDownRight,
@@ -22,6 +21,13 @@ import {
   TrendingUp,
   CheckCheck,
   CircleDot,
+  Compass,
+  Globe,
+  Lock,
+  Plane,
+  Hotel,
+  Building,
+  Plug,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +37,8 @@ import {
   adminDisputes,
   adminPartners,
 } from "@/data/admin";
+import { partnerTrips } from "@/data/partner-trips";
+import { FEATURE_FLAGS, PROVIDER_NAMES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 function formatCurrency(amount: number) {
@@ -74,6 +82,11 @@ export default function AdminOverviewPage() {
     .slice(0, 3);
   const pendingPartners = adminPartners.filter((p) => p.status === "pending");
 
+  const totalTrips = partnerTrips.length;
+  const privateTrips = partnerTrips.filter(
+    (t) => t.visibility === "private"
+  ).length;
+
   const statCards = [
     {
       label: "Total Users",
@@ -94,11 +107,11 @@ export default function AdminOverviewPage() {
       bg: "bg-emerald-50",
     },
     {
-      label: "Total Bookings",
-      value: stats.totalBookings.toLocaleString(),
-      change: `+${stats.bookingsToday} today`,
+      label: "Group Trips",
+      value: totalTrips.toLocaleString(),
+      change: `${privateTrips} private`,
       trend: "up" as const,
-      icon: Calendar,
+      icon: Compass,
       color: "text-violet-600",
       bg: "bg-violet-50",
     },
@@ -110,6 +123,27 @@ export default function AdminOverviewPage() {
       icon: AlertTriangle,
       color: "text-red-600",
       bg: "bg-red-50",
+    },
+  ];
+
+  const flagRows = [
+    {
+      label: "Host property listings",
+      enabled: FEATURE_FLAGS.hostPropertyListings,
+      icon: Building,
+      hint: "Listings, calendar, property bookings on the host portal",
+    },
+    {
+      label: "Public flight search",
+      enabled: FEATURE_FLAGS.publicFlightSearch,
+      icon: Plane,
+      hint: `${PROVIDER_NAMES.flights} integration`,
+    },
+    {
+      label: "Public hotel search",
+      enabled: FEATURE_FLAGS.publicHotelSearch,
+      icon: Hotel,
+      hint: `${PROVIDER_NAMES.hotels} integration`,
     },
   ];
 
@@ -126,12 +160,12 @@ export default function AdminOverviewPage() {
             All systems operational · {stats.platformHealth}% uptime
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <Button variant="outline" size="sm">
-            Export report
-          </Button>
-          <Button size="sm">Send announcement</Button>
-        </div>
+        <Button asChild variant="outline" size="sm" className="gap-1.5 shrink-0">
+          <Link href="/admin/trips">
+            <Compass className="h-4 w-4" />
+            Review trips
+          </Link>
+        </Button>
       </div>
 
       {/* Stats */}
@@ -273,6 +307,92 @@ export default function AdminOverviewPage() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      </div>
+
+      {/* Feature flags + Quick links */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 mb-8">
+        <div className="rounded-2xl border bg-white p-6 lg:col-span-2">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                <Plug className="h-4 w-4 text-primary" />
+                Surface gating
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Which traveler &amp; host surfaces are live vs. coming soon
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-2">
+            {flagRows.map((f) => (
+              <div
+                key={f.label}
+                className="flex items-center gap-3 rounded-xl border p-3"
+              >
+                <div
+                  className={cn(
+                    "flex h-9 w-9 items-center justify-center rounded-lg shrink-0",
+                    f.enabled
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  <f.icon className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate">{f.label}</p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {f.hint}
+                  </p>
+                </div>
+                <Badge
+                  className={cn(
+                    "text-[10px] shrink-0",
+                    f.enabled
+                      ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+                      : "bg-muted text-muted-foreground border-border"
+                  )}
+                >
+                  {f.enabled ? "Live" : "Coming soon"}
+                </Badge>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[11px] text-muted-foreground">
+            Flags live in <code>src/lib/constants.ts</code>. Flip a value to
+            light up the surface (deploy required).
+          </p>
+        </div>
+
+        <div className="rounded-2xl border bg-white p-6 flex flex-col">
+          <h2 className="text-lg font-bold mb-4">Quick links</h2>
+          <div className="space-y-2 flex-1">
+            <QuickLink
+              href="/admin/trips?vis=private"
+              icon={Lock}
+              label="Private trips"
+              hint="Audit invite-only listings"
+              badge={privateTrips}
+              accent="amber"
+            />
+            <QuickLink
+              href="/admin/disputes"
+              icon={ShieldAlert}
+              label="Open disputes"
+              hint={`${stats.urgentDisputes} urgent`}
+              badge={stats.openDisputes}
+              accent="red"
+            />
+            <QuickLink
+              href="/admin/partners"
+              icon={Building2}
+              label="Partner applications"
+              hint="Awaiting review"
+              badge={pendingPartners.length}
+              accent="violet"
+            />
           </div>
         </div>
       </div>
@@ -420,5 +540,45 @@ export default function AdminOverviewPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+
+function QuickLink({
+  href,
+  icon: Icon,
+  label,
+  hint,
+  badge,
+  accent,
+}: {
+  href: string;
+  icon: typeof Compass;
+  label: string;
+  hint: string;
+  badge: number;
+  accent: "amber" | "red" | "violet";
+}) {
+  const accentClass = {
+    amber: "bg-amber-50 text-amber-700",
+    red: "bg-red-50 text-red-700",
+    violet: "bg-violet-50 text-violet-700",
+  }[accent];
+  return (
+    <Link
+      href={href}
+      className="flex items-center gap-3 rounded-xl border p-3 transition-colors hover:bg-muted/30"
+    >
+      <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg shrink-0", accentClass)}>
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold truncate">{label}</p>
+        <p className="text-[11px] text-muted-foreground truncate">{hint}</p>
+      </div>
+      {badge > 0 && (
+        <span className="text-sm font-bold shrink-0">{badge}</span>
+      )}
+    </Link>
   );
 }

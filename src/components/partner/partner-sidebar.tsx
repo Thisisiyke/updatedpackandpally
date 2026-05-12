@@ -10,7 +10,6 @@ import {
   Wallet,
   Settings,
   LogOut,
-  Sparkles,
   Compass,
   MessageCircle,
   CreditCard,
@@ -65,18 +64,6 @@ export function PartnerSidebar() {
   return (
     <aside className="sticky top-14 h-[calc(100vh-3.5rem)] w-60 shrink-0 border-r bg-white flex flex-col">
       <div className="flex-1 overflow-y-auto p-4">
-        <div className="mb-6 rounded-lg bg-primary/5 p-3 border border-primary/10">
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-primary" />
-            <span className="text-xs font-semibold text-primary">
-              Partner Portal
-            </span>
-          </div>
-          <p className="text-xs text-muted-foreground mt-1">
-            Manage your properties & bookings
-          </p>
-        </div>
-
         <nav className="space-y-1">
           {navItems.map((item) => {
             const active =
@@ -129,7 +116,7 @@ export function PartnerSidebar() {
 
       <div className="border-t p-4 space-y-1">
         <Link
-          href="/partner/settings/terms"
+          href="/partner/settings"
           className={cn(
             "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
             pathname.startsWith("/partner/settings")

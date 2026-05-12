@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import {
   Search,
@@ -14,6 +14,7 @@ import {
   Mail,
   ShieldAlert,
   Eye,
+  CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +27,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { adminPartners } from "@/data/admin";
+import {
+  getSuspendedPartnerIds,
+  togglePartnerSuspension,
+  subscribeToSuspensions,
+} from "@/lib/admin-suspensions";
 import { cn } from "@/lib/utils";
 
 function formatCurrency(amount: number) {
@@ -65,6 +71,34 @@ function getStatusConfig(status: string) {
 export default function AdminPartnersPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [suspendedIds, setSuspendedIds] = useState<Set<string>>(new Set());
+  const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSuspendedIds(getSuspendedPartnerIds());
+    return subscribeToSuspensions(() => {
+      setSuspendedIds(getSuspendedPartnerIds());
+    });
+  }, []);
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2200);
+  };
+
+  const handleToggleSuspend = (partnerId: string, partnerName: string) => {
+    const wasSuspended = suspendedIds.has(partnerId);
+    if (
+      !wasSuspended &&
+      !confirm(
+        `Suspend ${partnerName}? Their trips remain visible to existing travelers but they can't publish new ones.`
+      )
+    ) {
+      return;
+    }
+    const nowSuspended = togglePartnerSuspension(partnerId);
+    showToast(nowSuspended ? "Partner suspended" : "Partner reinstated");
+  };
 
   const filtered = adminPartners.filter((p) => {
     if (statusFilter !== "all" && p.status !== statusFilter) return false;
@@ -86,6 +120,12 @@ export default function AdminPartnersPage() {
 
   return (
     <div className="p-6 lg:p-10">
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-full bg-emerald-500 px-4 py-2 text-sm font-medium text-white shadow-lg animate-[fade-in-up_300ms_ease-out]">
+          <CheckCircle2 className="h-4 w-4" />
+          {toast}
+        </div>
+      )}
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
@@ -158,13 +198,15 @@ export default function AdminPartnersPage() {
         {filtered.map((partner) => {
           const statusConfig = getStatusConfig(partner.status);
           const isPending = partner.status === "pending";
+          const isSuspendedLocal = suspendedIds.has(partner.id);
 
           return (
             <div
               key={partner.id}
               className={cn(
                 "rounded-2xl border bg-white p-5 transition-all hover:shadow-sm",
-                isPending && "border-amber-200 bg-amber-50/30"
+                isPending && "border-amber-200 bg-amber-50/30",
+                isSuspendedLocal && "border-red-200 bg-red-50/20"
               )}
             >
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
@@ -183,6 +225,12 @@ export default function AdminPartnersPage() {
                       <Badge className={cn("text-xs", statusConfig.class)}>
                         {statusConfig.label}
                       </Badge>
+                      {isSuspendedLocal && (
+                        <Badge className="text-xs bg-red-100 text-red-800 border-red-200 gap-1">
+                          <ShieldAlert className="h-2.5 w-2.5" />
+                          Suspended
+                        </Badge>
+                      )}
                     </div>
                     <p className="text-sm font-medium">{partner.company}</p>
                     <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
@@ -268,22 +316,27 @@ export default function AdminPartnersPage() {
                         <FileText className="h-4 w-4" />
                         View documents
                       </DropdownMenuItem>
-                      <DropdownMenuItem>
-                        <Building2 className="h-4 w-4" />
-                        View listings
-                      </DropdownMenuItem>
                       <DropdownMenuSeparator />
-                      {partner.status === "verified" ? (
-                        <DropdownMenuItem variant="destructive">
-                          <ShieldAlert className="h-4 w-4" />
-                          Suspend partner
-                        </DropdownMenuItem>
-                      ) : partner.status === "suspended" ? (
-                        <DropdownMenuItem>
+                      {isSuspendedLocal ? (
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            handleToggleSuspend(partner.id, partner.name)
+                          }
+                        >
                           <Check className="h-4 w-4" />
                           Reinstate
                         </DropdownMenuItem>
-                      ) : null}
+                      ) : (
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onSelect={() =>
+                            handleToggleSuspend(partner.id, partner.name)
+                          }
+                        >
+                          <ShieldAlert className="h-4 w-4" />
+                          Suspend partner
+                        </DropdownMenuItem>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>

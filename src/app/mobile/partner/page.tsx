@@ -341,20 +341,6 @@ export default function MobilePartnerDashboard() {
           )}
         </div>
 
-        {/* Cross-link to web partner portal for advanced features */}
-        <div className="px-5 mt-5">
-          <Link
-            href="/partner"
-            className="block rounded-2xl border border-dashed bg-white p-4 text-center"
-          >
-            <p className="text-xs font-semibold">
-              More tools on the web dashboard
-            </p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              Listings · Bookings · Calendar · Payouts · Surveys
-            </p>
-          </Link>
-        </div>
       </div>
 
       {/* Floating create button (sits above the tab bar) */}

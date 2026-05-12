@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
@@ -30,6 +30,7 @@ import { Label } from "@/components/ui/label";
 import { MobileHeader } from "@/components/mobile/mobile-header";
 import { generatePartnerTrip } from "@/lib/ai/partner-trip-generator";
 import { tripCategories, type PartnerTrip } from "@/data/partner-trips";
+import { getHostDefaults } from "@/lib/host-defaults";
 import { saveUserPartnerTrip } from "@/lib/user-partner-trips";
 import { PartialPaymentCard } from "@/components/partner/partial-payment-card";
 import type { CustomSplit, PaymentSchedule } from "@/lib/installment-schedule";
@@ -205,6 +206,25 @@ export default function MobileCreateTripPage() {
   const [publishing, setPublishing] = useState(false);
   const [publishedId, setPublishedId] = useState<string | null>(null);
 
+  // Pre-fill from host-level defaults (Settings → Trip defaults).
+  useEffect(() => {
+    const d = getHostDefaults();
+    if (typeof d.taxRate === "number") {
+      setTaxRatePct(String(Math.round(d.taxRate * 10000) / 100));
+    }
+    if (d.partialPaymentEnabled) setInstallmentsEnabled(true);
+    if (d.requireTravelerId) setRequireTravelerId(true);
+    if (d.requestSocialMedia) setRequestSocialMedia(true);
+    if (d.hostPolicy) setHostPolicy(d.hostPolicy);
+    if (d.tripPolicyPdf) {
+      setTripPolicyPdf({
+        name: d.tripPolicyPdf.name,
+        dataUrl: d.tripPolicyPdf.dataUrl,
+        sizeBytes: d.tripPolicyPdf.sizeBytes ?? 0,
+      });
+    }
+  }, []);
+
   const durationDays = useMemo(() => {
     if (!startDate || !endDate) return 0;
     const d = Math.round(
@@ -271,6 +291,8 @@ export default function MobileCreateTripPage() {
     setPublishing(true);
     await new Promise((r) => setTimeout(r, 1200));
 
+    const defaultStatus =
+      getHostDefaults().newTripStatus === "draft" ? "draft" : "published";
     const id = `utrip-${Date.now()}`;
     const durationForTrip = durationDays || 7;
     const newTrip: PartnerTrip = {
@@ -327,7 +349,7 @@ export default function MobileCreateTripPage() {
       })),
       included,
       notIncluded,
-      status: "published",
+      status: defaultStatus,
       visibility,
       revenue: 0,
       createdAt: new Date().toISOString(),
